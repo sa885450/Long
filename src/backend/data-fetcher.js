@@ -167,15 +167,16 @@ async function fetchYahooKlines(symbol, interval) {
     else if (yahooInterval === '1d') range = '1y';  // 1d 抓 1年
 
     try {
-        // 使用 yfinance 公開 API 或類似的 endpoint
-        const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
-            params: {
-                interval: yahooInterval,
-                range: range
-            }
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
+        console.log(`[FETCH] Yahoo: ${url} (interval:${yahooInterval}, range:${range})`);
+        const response = await axios.get(url, {
+            params: { interval: yahooInterval, range: range },
+            timeout: 8000
         });
 
         const result = response.data.chart.result[0];
+        if (!result || !result.timestamp) throw new Error('Yahoo Finance returned no data');
+        
         const timestamps = result.timestamp;
         const quotes = result.indicators.quote[0];
 
