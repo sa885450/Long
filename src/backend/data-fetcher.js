@@ -47,7 +47,13 @@ async function fetchBinanceKlines(symbol, interval) {
         try {
             return await fetchCryptoCompareKlines(symbol, interval);
         } catch (ccError) {
-            throw new Error(`比特幣資料獲取失敗。Binance 區域封鎖 (451) 且備援 API 亦失效: ${ccError.message}`);
+            console.warn(`CryptoCompare failed: ${ccError.message}, attempting Yahoo Finance (final fallback)...`);
+            try {
+                const yahooBtcSymbol = 'BTC-USD';
+                return await fetchYahooKlines(yahooBtcSymbol, interval);
+            } catch (yahooError) {
+                throw new Error(`比特幣資料獲取失敗。已嘗試 Binance (451)、CryptoCompare (Rate Limit) 與 Yahoo Finance 皆失效。錯誤: ${yahooError.message}`);
+            }
         }
     }
     throw lastError;
