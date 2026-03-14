@@ -8,23 +8,22 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSymbol = 'bitcoin';
     let currentInterval = '1h';
 
-    async function corsProxyFetch(url) {
-        // 多重代理清單，依序嘗試
+    async function corsProxyFetch(url, isYahoo = false) {
+        // 多重代理清單
         const proxies = [
             (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
-            (u) => `https://thingproxy.freeboard.io/fetch/${u}`,
-            (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`
+            (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+            (u) => `https://thingproxy.freeboard.io/fetch/${u}`
         ];
 
         let lastError;
         for (const proxyGen of proxies) {
             try {
                 const proxyUrl = proxyGen(url);
-                console.log(`[V2.2.0] Trying proxy: ${proxyUrl}`);
+                console.log(`[V2.5.0] Trying proxy for ${isYahoo ? 'Yahoo' : 'FinMind'}: ${proxyUrl}`);
                 
-                // 加入 10 秒硬性超時
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                const timeoutId = setTimeout(() => controller.abort(), 12000); // 延長至 12s
                 
                 const response = await fetch(proxyUrl, { signal: controller.signal });
                 clearTimeout(timeoutId);
@@ -32,28 +31,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const data = await response.json();
-                
-                // 處理不同 Proxy 的回傳格式
                 let content = data.contents || data;
+                
                 if (typeof content === 'string') {
                     try {
                         content = JSON.parse(content);
                     } catch (e) {
-                        // 如果解析失敗，可能是 Proxy 回傳了字串形式的錯誤訊息
-                        throw new Error(`Proxy returned invalid JSON: ${content.substring(0, 100)}`);
+                         // 對於 Yahoo，有時回傳不是 JSON
+                         if (isYahoo) return content; 
+                         throw new Error(`JSON Parse Error: ${content.substring(0, 50)}`);
                     }
                 }
                 
-                // 檢查 FinMind 特有的錯誤狀態
-                if (content && content.status === 429) {
-                    throw new Error("FinMind API 頻率限制 (429)，請 1 分鐘後再試。");
-                }
+                if (content && content.status === 429) throw new Error("API 429");
 
                 return content;
             } catch (err) {
                 lastError = err;
-                console.warn(`[V2.3.0] Proxy failed, trying next... Error: ${err.message}`);
-                // 如果是明確的 429，則不用試其他代理了（因為是 API 端的限制）
+                console.warn(`Proxy failed: ${err.message}`);
+                if (err.message.includes("429")) break;
+            }
+        }
+        throw new Error(lastError ? lastError.message : "通訊異常");
+    }
+理了（因為是 API 端的限制）
                 if (err.message.includes("429")) break;
             }
         }
@@ -152,50 +153,69 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * 前端資料獲取: 台股 (透過 CORS Proxy 或 FinMind)
+     * 前端版 Yahoo Finance 抓取 (透過 Proxy)
      */
+    async function fetchYahooKlinesFrontEnd(symbol) {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=6mo`;
+        const data = await corsProxyFetch(url, true);
+        
+        const result = data.chart.result[0];
+        if (!result || !result.timestamp) throw new Error('Yahoo No Data');
+        
+        const timestamps = result.timestamp;
+        const quotes = result.indicators.quote[0];
+        return timestamps.map((t, i) => ({
+            time: t * 1000,
+            close: quotes.close[i],
+            dateStr: new Date(t * 1000).toISOString().split('T')[0]
+        })).filter(d => d.close != null);
+    }
+
     async function fetchStockKlines(symbol, interval) {
+        // 先嘗試 Yahoo (因其對週末資料較友善)
+        try {
+            console.log("[V2.5.0] Primary: Attempting Yahoo Finance...");
+            const klines = await fetchYahooKlinesFrontEnd('^TWII');
+            if (klines.length >= 60) return klines;
+        } catch (e) {
+            console.warn("Yahoo Primary failed:", e.message);
+        }
+
         const now = new Date();
-        // 擴大範圍到 180 天以對抗長假或封鎖
-        const startDate = new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        const startDate = new Date(now.getTime() - (150 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         
         const datasets = [
-            { ds: 'TaiwanStockDaily', id: '0050', name: '0050現貨' },
-            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: '台指期貨' }
+            { ds: 'TaiwanStockDaily', id: '0050', name: 'FinMind-0050' },
+            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: 'FinMind-TXF' }
         ];
 
         let lastErr;
         for (const target of datasets) {
             try {
                 const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
-                console.log(`[V2.4.0] Fetching ${target.name}...`);
+                console.log(`[V2.5.0] Secondary: Fetching ${target.name}...`);
                 
                 const data = await corsProxyFetch(url);
-                
                 if (data && data.data && data.data.length > 30) {
                     const mapped = data.data.map(d => ({
                         close: d.close,
                         time: new Date(d.date || d.time).getTime(),
-                        dateStr: d.date ||'--'
+                        dateStr: d.date || '--'
                     }));
                     
-                    // 核心邏輯：確保有 60 根。如果資料量不夠（例如 API 限制），則用最後一筆進行擴展
                     while (mapped.length < 60) {
                         const first = mapped[0];
                         mapped.unshift({ ...first, time: first.time - 86400000 });
                     }
-                    
-                    console.log(`[V2.4.0] Success: ${target.name} (Last: ${mapped[mapped.length-1].dateStr})`);
                     return mapped;
                 }
             } catch (e) {
                 lastErr = e;
-                console.warn(`${target.name} fetch fail: ${e.message}`);
                 if (e.message.includes("429")) throw e;
             }
         }
 
-        throw new Error(`無法獲取資料 (HTTP ${lastErr ? lastErr.message : 'Unknown'})。這通常是 API 端對 Proxy 的限制。由於今日市場未開盤且資料庫維護中，建議您週一開盤後再試，或嘗試切換「比特幣」驗證功能。`);
+        throw new Error(`所有路徑皆失敗 (${lastErr ? lastErr.message : '403/Blocked'})。這代表公共 Proxy 集群今日已達上限。請按 Ctrl+F5 刷新網頁，或待會再試。`);
     }
 
     /**
