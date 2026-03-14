@@ -10,7 +10,7 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.8.0'; // 跨平台終極防護版
+const VERSION = '1.9.0'; // 全自動智慧切換版
 const myCache = new NodeCache({ stdTTL: 3600 });
 
 app.use(cors());
@@ -53,12 +53,14 @@ app.get('/api/analyze', async (req, res) => {
                 dataSource = 'Yahoo Finance';
             } catch (yahooErr) {
                 console.warn(`[BACKEND v${VERSION}] Yahoo failed: ${yahooErr.message}, absolute fallback to FinMind/Static`);
-                // 這裡原本有誤植，現在改為直接呼叫備援函數
+                // 核心修復：不管 Yahoo 報什麼錯 (包含 429)，這裡強制改用 fetchFinMindKlines
                 try {
-                    klines = await fetchYahooKlines('^TWII', interval);
+                    const { fetchFinMindKlines } = require('./data-fetcher');
+                    klines = await fetchFinMindKlines('0050', interval);
                     dataSource = 'FinMind (Auto-Fallback)';
                 } catch (finalErr) {
-                    throw new Error(`所有資料源皆連線受限 (429)。這是因為 Render 共用 IP 被封鎖，請 1-2 分鐘後點擊 Ctrl+F5 重試。`);
+                    // 如果 FinMind 也倒了，這裡拋出一個能讓使用者看懂的建議
+                    throw new Error(`資料源連線受限 (429/ERROR)。這通常是 Render IP 封鎖導致。請 1 分鐘後改選「天」或「4小時」週期重試。`);
                 }
             }
         }

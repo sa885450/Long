@@ -193,13 +193,9 @@ async function fetchYahooKlines(symbol, interval) {
             volume: quotes.volume[i]
         })).filter(d => d.close !== null); // 過濾掉空值
     } catch (error) {
-        console.warn(`Yahoo Finance failed for ${symbol}: ${error.message}, trying FinMind...`);
-        try {
-            return await fetchFinMindKlines(symbol, interval);
-        } catch (fmError) {
-            console.error('Final fallback failed:', fmError.message);
-            throw error; // 仍然拋出原爆錯 (429)，因為 FinMind 如果也失敗通常是連線問題
-        }
+        // 如果是 429 或任何錯誤，主動降級到 FinMind
+        console.warn(`Yahoo Finance failed (${symbol}): ${error.message}, strictly falling back to FinMind...`);
+        return await fetchFinMindKlines(symbol, interval);
     }
 }
 
@@ -207,43 +203,41 @@ async function fetchYahooKlines(symbol, interval) {
  * FinMind 備援 (台股資料源)
  */
 async function fetchFinMindKlines(symbol, interval) {
-    // 簡單映射，FinMind 通常需要日期範圍
-    const finMindSymbol = 'TXF'; // 針對台指期需求，強制指向 TXF
-    const now = new Date();
-    // 增加抓取天數到 90 天
-    const startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+    try {
+        const now = new Date();
+        const startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        
+        // 加入隨機延遲，避免 FinMind 也 429
+        await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
 
-    const response = await axios.get('https://api.finmindtrade.com/api/v4/data', {
-        params: {
-            dataset: 'TaiwanStockMonth', // 改用月資料或更穩定的集合
-            data_id: '0050',           // 週末改分析 0050 作為台股大盤代表，因為 0050 資料最穩
-            start_date: startDate
-        }
-    });
-
-    if (!response.data || response.data.data.length === 0) {
-        // 如果 0050 也沒資料，嘗試期貨
-        const futRes = await axios.get('https://api.finmindtrade.com/api/v4/data', {
-            params: { dataset: 'TaiwanFuturesDaily', data_id: 'TXF', start_date: startDate }
+        const response = await axios.get('https://api.finmindtrade.com/api/v4/data', {
+            params: {
+                dataset: 'TaiwanStockMonth',
+                data_id: '0050',
+                start_date: startDate
+            },
+            timeout: 10000
         });
-        if (futRes.data && futRes.data.data.length > 0) return futRes.data.data.map(d => ({
-            time: new Date(d.date).getTime(),
-            open: d.open, high: d.max, low: d.min, close: d.close, volume: d.volume
-        }));
-        throw new Error('FinMind 所有資料庫暫時無回應');
-    }
 
-    return response.data.data.map(d => ({
-        time: new Date(d.date).getTime(),
-        open: d.open,
-        high: d.max,
-        low: d.min,
-        close: d.close,
-        volume: d.volume
-    }));
+        if (!response.data || !response.data.data || response.data.data.length === 0) {
+            throw new Error('FinMind API returned empty or error');
+        }
+
+        return response.data.data.map(d => ({
+            time: new Date(d.date).getTime(),
+            open: d.open,
+            high: d.max,
+            low: d.min,
+            close: d.close,
+            volume: d.volume
+        }));
+    } catch (e) {
+        throw new Error(`FinMind Fallback Failed: ${e.message}`);
+    }
 }
 
 module.exports = {
     fetchBinanceKlines,
-    fetchYahooKlines
+    fetchYahooKlines,
+    fetchFinMindKlines
 };
