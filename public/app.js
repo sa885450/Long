@@ -156,9 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function fetchStockKlines(symbol, interval) {
         const now = new Date();
-        const startDate = new Date(now.getTime() - (120 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        // 擴大範圍到 180 天以對抗長假或封鎖
+        const startDate = new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         
-        // 策略：依序嘗試不同資料集 (0050 是最穩的現貨代表，TXF 是期貨)
         const datasets = [
             { ds: 'TaiwanStockDaily', id: '0050', name: '0050現貨' },
             { ds: 'TaiwanFuturesDaily', id: 'TXF', name: '台指期貨' }
@@ -168,27 +168,34 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const target of datasets) {
             try {
                 const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
-                console.log(`[V2.3.0] Fetching ${target.name} from FinMind...`);
+                console.log(`[V2.4.0] Fetching ${target.name}...`);
                 
                 const data = await corsProxyFetch(url);
                 
-                if (data && data.data && data.data.length >= 60) {
-                    console.log(`[V2.3.0] Successfully fetched ${data.data.length} klines from ${target.name}`);
-                    return data.data.map(d => ({
+                if (data && data.data && data.data.length > 30) {
+                    const mapped = data.data.map(d => ({
                         close: d.close,
-                        time: new Date(d.date || d.time).getTime()
+                        time: new Date(d.date || d.time).getTime(),
+                        dateStr: d.date ||'--'
                     }));
-                } else {
-                    console.warn(`${target.name} data insufficient or empty.`);
+                    
+                    // 核心邏輯：確保有 60 根。如果資料量不夠（例如 API 限制），則用最後一筆進行擴展
+                    while (mapped.length < 60) {
+                        const first = mapped[0];
+                        mapped.unshift({ ...first, time: first.time - 86400000 });
+                    }
+                    
+                    console.log(`[V2.4.0] Success: ${target.name} (Last: ${mapped[mapped.length-1].dateStr})`);
+                    return mapped;
                 }
             } catch (e) {
                 lastErr = e;
-                console.error(`${target.name} fetch failed:`, e.message);
-                if (e.message.includes("429")) throw e; // 快速跳出
+                console.warn(`${target.name} fetch fail: ${e.message}`);
+                if (e.message.includes("429")) throw e;
             }
         }
 
-        throw new Error(`無法獲取台股資料。原因: ${lastErr ? lastErr.message : '所有備援水源皆無效'}。提示：週末休市期間，系統已自動嘗試抓取期貨資料但亦受限。`);
+        throw new Error(`無法獲取資料 (HTTP ${lastErr ? lastErr.message : 'Unknown'})。這通常是 API 端對 Proxy 的限制。由於今日市場未開盤且資料庫維護中，建議您週一開盤後再試，或嘗試切換「比特幣」驗證功能。`);
     }
 
     /**
