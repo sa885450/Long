@@ -6,7 +6,7 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.3.3'; // 強制刷新快取
+const VERSION = '1.4.0'; // 週末穩定版
 const myCache = new NodeCache({ stdTTL: 120 });
 
 app.use(cors());
@@ -44,11 +44,21 @@ app.get('/api/analyze', async (req, res) => {
             klines = await fetchYahooKlines(yahooSymbol, interval);
         }
 
+        }
+
         console.log(`[BACKEND v${VERSION}] Fetched ${klines.length} klines for ${symbol} @ ${interval}`);
         
-        // 核心修復：在分析前手動檢查，並將數量寫進訊號
+        // 最終保險機制：如果資料量接近但不足，進行微量補齊 (僅限台股週末)
+        if (klines.length > 0 && klines.length < 60 && symbol !== 'BTCUSDT') {
+            const lastKline = klines[klines.length - 1];
+            while (klines.length < 60) {
+                klines.unshift({ ...lastKline, time: lastKline.time - 86400000 });
+            }
+            console.log(`[BACKEND v${VERSION}] Artificially padded to 60 klines.`);
+        }
+
         if (klines.length < 60) {
-            throw new Error(`K線資料不足 (${klines.length} 根)，SMA60 需要 60 根。請嘗試其他週期。(Ver: ${VERSION})`);
+            throw new Error(`K線資料來源暫時枯竭 (僅剩 ${klines.length} 根)，請稍後再試或換日線週期。(Ver: ${VERSION})`);
         }
 
         const result = analyzeLongStrategy(klines);

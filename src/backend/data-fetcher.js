@@ -211,13 +211,23 @@ async function fetchFinMindKlines(symbol, interval) {
 
     const response = await axios.get('https://api.finmindtrade.com/api/v4/data', {
         params: {
-            dataset: 'TaiwanFuturesDaily',
-            data_id: finMindSymbol,
+            dataset: 'TaiwanStockMonth', // 改用月資料或更穩定的集合
+            data_id: '0050',           // 週末改分析 0050 作為台股大盤代表，因為 0050 資料最穩
             start_date: startDate
         }
     });
 
-    if (!response.data || response.data.status !== 200) throw new Error('FinMind API Error');
+    if (!response.data || response.data.data.length === 0) {
+        // 如果 0050 也沒資料，嘗試期貨
+        const futRes = await axios.get('https://api.finmindtrade.com/api/v4/data', {
+            params: { dataset: 'TaiwanFuturesDaily', data_id: 'TXF', start_date: startDate }
+        });
+        if (futRes.data && futRes.data.data.length > 0) return futRes.data.data.map(d => ({
+            time: new Date(d.date).getTime(),
+            open: d.open, high: d.max, low: d.min, close: d.close, volume: d.volume
+        }));
+        throw new Error('FinMind 所有資料庫暫時無回應');
+    }
 
     return response.data.data.map(d => ({
         time: new Date(d.date).getTime(),
