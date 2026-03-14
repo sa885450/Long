@@ -19,8 +19,9 @@
 body {
     background-color: var(--primary-bg);
     color: var(--text-main);
-    overflow: hidden;
-    height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-height: 100vh;
 }
 
 .background-glow {
@@ -45,9 +46,9 @@ body {
 
 .app-container {
     display: flex;
-    padding: 2rem;
-    gap: 2rem;
-    height: 100vh;
+    padding: 1rem;
+    gap: 1.5rem;
+    min-height: 100vh;
     max-width: 1400px;
     margin: 0 auto;
 }
@@ -335,4 +336,57 @@ body {
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+/* Responsive Mobile */
+@media (max-width: 768px) {
+    .app-container {
+        flex-direction: column;
+        padding: 1rem;
+    }
+
+    .sidebar {
+        width: 100%;
+        padding: 1.5rem;
+    }
+
+    .execute-btn {
+        margin-top: 1rem;
+    }
+
+    .main-content {
+        padding-right: 0;
+    }
+
+    .strategy-comparison {
+        grid-template-columns: 1fr;
+    }
+
+    .result-card {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+    }
+
+    .status-badge {
+        font-size: 1.1rem;
+        margin-left: 0.5rem;
+    }
+
+    .details-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .detail-card.full-width {
+        grid-column: span 1;
+    }
+
+    .num {
+        font-size: 1.5rem;
+    }
+
+    .macd-row {
+        flex-direction: column;
+        gap: 0.5rem;
+        align-items: flex-start;
+    }
 }
