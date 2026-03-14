@@ -5,12 +5,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultArea = document.getElementById('result-area');
     const loading = document.getElementById('loading');
 
-    // 判定 API 網址：如果是在 GitHub Pages 上，則需要手動指定您的 Render API 網址
-    // 您可以在部署完 Render 後，回過頭來修改這裡的 'https://your-app-name.onrender.com'
-    const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-        ? '' 
-        : 'https://long-4q43.onrender.com'; 
-
     let currentSymbol = 'bitcoin';
     let currentInterval = '1h';
 
@@ -44,27 +38,28 @@ document.addEventListener('DOMContentLoaded', () => {
         resultArea.style.display = 'none';
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/analyze?symbol=${currentSymbol}&interval=${currentInterval}`);
-            const data = await response.json();
-
-            if (data.success) {
-                displayResults(data);
+            let klines;
+            console.log(`[V2.0.0] Starting client-side analysis for ${currentSymbol} @ ${currentInterval}`);
+            
+            if (currentSymbol === 'bitcoin') {
+                klines = await fetchCryptoKlines('BTC-USDT', currentInterval);
             } else {
-                // 如果後端回傳 success: false，裡面會有我們定義的 debug
-                let msg = data.message;
-                if (data.debug) {
-                    msg += ` (版本: ${data.debug.version})`;
-                }
-                alert(`發生錯誤: ${msg}`);
+                klines = await fetchStockKlines('^TWII', currentInterval);
             }
+
+            if (!klines || klines.length < 60) {
+                throw new Error(`K線資料量不足 (${klines ? klines.length : 0} 根)，分析無法進行。請稍後再試。`);
+            }
+
+            const analysis = performAnalysis(klines);
+            displayResults(analysis);
         } catch (error) {
-            console.error('Network/Parse error:', error);
-            alert(`網路連線異常或伺服器忙碌中，請稍後重試。`);
+            console.error('Analysis error:', error);
+            alert(`發生錯誤: ${error.message}`);
         } finally {
             loading.style.display = 'none';
-            
-            // 實施 3 秒冷卻時間，防止連點
-            let cooldown = 3;
+            // 實施 5 秒冷卻時間
+            let cooldown = 5;
             const timer = setInterval(() => {
                 executeBtn.innerText = `冷卻中 (${cooldown}s)`;
                 cooldown--;
@@ -76,6 +71,105 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 1000);
         }
     });
+
+    /**
+     * 前端資料獲取: 加密貨幣 (使用 Binance Public API 或其他無需 CORS 的來源)
+     */
+    async function fetchCryptoKlines(symbol, interval) {
+        // 使用 Binance Public API
+        const mapping = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
+        const binanceInterval = mapping[interval] || '1h';
+        const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${binanceInterval}&limit=100`;
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        return data.map(d => ({
+            close: parseFloat(d[4]),
+            time: d[0]
+        }));
+    }
+
+    /**
+     * 前端資料獲取: 台股 (透過 CORS Proxy 或 FinMind)
+     */
+    async function fetchStockKlines(symbol, interval) {
+        // 前端直接呼叫 Yahoo Finance 通常會被 CORS 擋住
+        // 因此這裡轉向 FinMind 的公開 API (對前端較友善)
+        const now = new Date();
+        const startDate = new Date(now.getTime() - (60 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockMonth&data_id=0050&start_date=${startDate}`;
+        
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!json.data || json.data.length === 0) throw new Error('無法取得台股資料 (FinMind 限制)');
+        
+        return json.data.map(d => ({
+            close: d.close,
+            time: new Date(d.date).getTime()
+        }));
+    }
+
+    /**
+     * 前端技術分析 (SMA + MACD)
+     */
+    function performAnalysis(klines) {
+        const closes = klines.map(k => k.close);
+        const lastPrice = closes[closes.length - 1];
+
+        // 簡易 SMA 實作 (避免依賴外部庫)
+        const getSMA = (data, window) => {
+            let result = [];
+            for (let i = window - 1; i < data.length; i++) {
+                const slice = data.slice(i - window + 1, i + 1);
+                const sum = slice.reduce((a, b) => a + b, 0);
+                result.push(sum / window);
+            }
+            return result;
+        };
+
+        // 簡易 EMA 實作
+        const getEMA = (data, window) => {
+            const k = 2 / (window + 1);
+            let emaArr = [data[0]];
+            for (let i = 1; i < data.length; i++) {
+                emaArr.push(data[i] * k + emaArr[i - 1] * (1 - k));
+            }
+            return emaArr;
+        };
+
+        const sma10 = getSMA(closes, 10);
+        const sma60 = getSMA(closes, 60);
+
+        // MACD (12, 26, 9)
+        const ema12 = getEMA(closes, 12);
+        const ema26 = getEMA(closes, 26);
+        const dif = ema12.map((v, i) => v - ema26[i]);
+        const dea = getEMA(dif, 9);
+        
+        const currSMA10 = sma10[sma10.length - 1];
+        const prevSMA10 = sma10[sma10.length - 2];
+        const currSMA60 = sma60[sma60.length - 1];
+        const prevSMA60 = sma60[sma60.length - 2];
+        const currDIF = dif[dif.length - 1];
+        const currDEA = dea[dea.length - 1];
+        const prevDIF = dif[dif.length - 2];
+
+        // 判斷
+        const cond1 = lastPrice > currSMA60;
+        const cond2 = (currSMA10 > currSMA60) && (currSMA10 > prevSMA10);
+        const cond3 = (currDIF > currDEA) && (currDIF > prevDIF);
+
+        return {
+            success: true,
+            isMatch: cond1 && cond2 && cond3,
+            summary: {
+                lastPrice,
+                sma10: { value: currSMA10.toFixed(2), trend: currSMA10 > prevSMA10 ? '向上' : '向下' },
+                sma60: { value: currSMA60.toFixed(2), trend: currSMA60 > prevSMA60 ? '向上' : '向下' },
+                macd: { fast: currDIF.toFixed(2), signal: currDEA.toFixed(2), isBullish: cond3 ? '是' : '否' }
+            }
+        };
+    }
 
     function displayResults(data) {
         const decision = document.getElementById('final-decision');
