@@ -33,7 +33,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 執行分析
-    executeBtn.addEventListener('click', async () => {
+    executeBtn.addEventListener('click', async function runAnalysis() {
+        if (executeBtn.disabled) return;
+
+        executeBtn.disabled = true;
+        const originalBtnText = executeBtn.innerText;
+        executeBtn.innerText = '分析中...';
+        
         loading.style.display = 'block';
         resultArea.style.display = 'none';
 
@@ -48,9 +54,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Fetch error:', error);
-            alert('無法連接到後端服務');
+            alert(`無法連接到後端服務: ${error.message}`);
         } finally {
             loading.style.display = 'none';
+            
+            // 實施 3 秒冷卻時間，防止連點
+            let cooldown = 3;
+            const timer = setInterval(() => {
+                executeBtn.innerText = `冷卻中 (${cooldown}s)`;
+                cooldown--;
+                if (cooldown < 0) {
+                    clearInterval(timer);
+                    executeBtn.disabled = false;
+                    executeBtn.innerText = originalBtnText;
+                }
+            }, 1000);
         }
     });
 

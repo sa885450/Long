@@ -181,9 +181,43 @@ async function fetchYahooKlines(symbol, interval) {
             volume: quotes.volume[i]
         })).filter(d => d.close !== null); // 過濾掉空值
     } catch (error) {
-        console.error('Error fetching Yahoo data:', error.message);
-        throw error;
+        console.warn(`Yahoo Finance failed for ${symbol}: ${error.message}, trying FinMind...`);
+        try {
+            return await fetchFinMindKlines(symbol, interval);
+        } catch (fmError) {
+            console.error('Final fallback failed:', fmError.message);
+            throw error; // 仍然拋出原爆錯 (429)，因為 FinMind 如果也失敗通常是連線問題
+        }
     }
+}
+
+/**
+ * FinMind 備援 (台股資料源)
+ */
+async function fetchFinMindKlines(symbol, interval) {
+    // 簡單映射，FinMind 通常需要日期範圍
+    const finMindSymbol = symbol.startsWith('^') ? 'TXF' : symbol; // 簡單假設 ^TWII 對應大台指
+    const now = new Date();
+    const startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+
+    const response = await axios.get('https://api.finmindtrade.com/api/v4/data', {
+        params: {
+            dataset: 'TaiwanFuturesDaily',
+            data_id: finMindSymbol,
+            start_date: startDate
+        }
+    });
+
+    if (!response.data || response.data.status !== 200) throw new Error('FinMind API Error');
+
+    return response.data.data.map(d => ({
+        time: new Date(d.date).getTime(),
+        open: d.open,
+        high: d.max,
+        low: d.min,
+        close: d.close,
+        volume: d.volume
+    }));
 }
 
 module.exports = {
