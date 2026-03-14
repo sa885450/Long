@@ -16,6 +16,12 @@ app.get('/api/analyze', async (req, res) => {
     const { symbol, interval } = req.query;
     const cacheKey = `${symbol}_${interval}`;
 
+    // 針對台股符號優化
+    const finMindSymbol = symbol.includes('TXF') ? 'TXF' : 'TXF'; // 強制指向台指期
+    const now = new Date();
+    // 擴大到 90 天，確保資料充足
+    const startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+
     // 檢查快取
     const cachedData = myCache.get(cacheKey);
     if (cachedData) {
@@ -31,12 +37,13 @@ app.get('/api/analyze', async (req, res) => {
             const binanceInterval = mapInterval(interval);
             klines = await fetchBinanceKlines(binanceSymbol, binanceInterval);
         } else {
-            // 預設台指期
-            const yahooSymbol = '^TWII'; // 這裡可以根據實際細化
-            const yahooInterval = interval;
-            klines = await fetchYahooKlines(yahooSymbol, yahooInterval);
+            // 預設台指期：改用 TXF.RT (台指期近月) 或 WTX&F (小型台指)
+            // 如果是在週末，TXF.RT 資料可能不連貫，建議增加備援
+            const yahooSymbol = 'TXF.RT'; 
+            klines = await fetchYahooKlines(yahooSymbol, interval);
         }
 
+        console.log(`Successfully fetched ${klines.length} klines for ${symbol} (${interval})`);
         const result = analyzeLongStrategy(klines);
         
         // 存入快取

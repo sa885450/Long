@@ -203,10 +203,10 @@ async function fetchYahooKlines(symbol, interval) {
  */
 async function fetchFinMindKlines(symbol, interval) {
     // 簡單映射，FinMind 通常需要日期範圍
-    const finMindSymbol = symbol.startsWith('^') ? 'TXF' : symbol;
+    const finMindSymbol = 'TXF'; // 針對台指期需求，強制指向 TXF
     const now = new Date();
-    // 將 30 天擴大到 60 天，確保即便扣除假日，分線或日線資料也絕對超過 60 根
-    const startDate = new Date(now.getTime() - (60 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+    // 增加抓取天數到 90 天
+    const startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     const response = await axios.get('https://api.finmindtrade.com/api/v4/data', {
         params: {
