@@ -4,6 +4,7 @@ const { SMA, MACD } = require('technicalindicators');
  * 策略邏輯判斷 ENGINE
  */
 function analyzeLongStrategy(klines) {
+    console.log(`Analyzing strategy with ${klines.length} klines`);
     const closes = klines.map(k => k.close);
     const lastPrice = closes[closes.length - 1];
 
@@ -37,6 +38,14 @@ function analyzeLongStrategy(klines) {
     const prevMACD = macdValues[macdValues.length - 2];
 
     if (!currentMACD || !prevMACD) {
+        const yahooInterval = intervalMap[interval] || '1d';
+    // 解決 429 與資料量不足：
+    // 短週期 (5m, 15m) 如果抓 1mo 可能會被 Yahoo 拒絕 API 請求
+    // 我們改用更精確的範圍：5m 與 15m 只需要最近 5 天就超過 100 根 K 線了
+    let range = '1mo';
+    if (yahooInterval === '5m' || yahooInterval === '15m') range = '5d';
+    else if (yahooInterval === '60m') range = '1mo';
+    else if (yahooInterval === '1d') range = '1y'; 
         throw new Error('無法計算 MACD 指標。');
     }
 
