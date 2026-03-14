@@ -6,7 +6,7 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.3.1'; // 每次部署手動更新
+const VERSION = '1.3.3'; // 強制刷新快取
 const myCache = new NodeCache({ stdTTL: 120 });
 
 app.use(cors());
@@ -44,7 +44,13 @@ app.get('/api/analyze', async (req, res) => {
             klines = await fetchYahooKlines(yahooSymbol, interval);
         }
 
-        console.log(`[BACKEND] Fetched ${klines.length} klines for ${symbol} @ ${interval}`);
+        console.log(`[BACKEND v${VERSION}] Fetched ${klines.length} klines for ${symbol} @ ${interval}`);
+        
+        // 核心修復：在分析前手動檢查，並將數量寫進訊號
+        if (klines.length < 60) {
+            throw new Error(`K線資料不足 (${klines.length} 根)，SMA60 需要 60 根。請嘗試其他週期。(Ver: ${VERSION})`);
+        }
+
         const result = analyzeLongStrategy(klines);
         
         // 存入快取
