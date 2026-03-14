@@ -6,7 +6,8 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const myCache = new NodeCache({ stdTTL: 120 }); // 快取延長至 120 秒
+const VERSION = '1.3.1'; // 每次部署手動更新
+const myCache = new NodeCache({ stdTTL: 120 });
 
 app.use(cors());
 app.use(express.json());
@@ -14,7 +15,8 @@ app.use(express.static('public')); // 提供靜態檔案
 
 app.get('/api/analyze', async (req, res) => {
     const { symbol, interval } = req.query;
-    const cacheKey = `${symbol}_${interval}`;
+    // 將版本號加入快取鍵，確保每次部署後舊快取失效
+    const cacheKey = `${VERSION}_${symbol}_${interval}`;
 
     // 針對台股符號優化
     const finMindSymbol = 'TXF'; // 強制指向台指期
@@ -48,17 +50,17 @@ app.get('/api/analyze', async (req, res) => {
         // 存入快取
         myCache.set(cacheKey, result);
         
-        res.json({ success: true, ...result });
+        res.json({ 
+            success: true, 
+            ...result, 
+            debug: { klinesCount: klines.length, source: symbol === 'BTCUSDT' ? 'Binance' : 'Yahoo/FinMind' } 
+        });
     } catch (error) {
-        console.error('API Error:', error.message);
-        if (error.response) {
-            console.error('Data:', error.response.data);
-            console.error('Status:', error.response.status);
-        }
+        console.error(`[API ERROR v${VERSION}]:`, error.message);
         res.status(500).json({ 
             success: false, 
             message: error.message,
-            detail: error.response ? error.response.data : null 
+            debug: { version: VERSION, error: error.message }
         });
     }
 });

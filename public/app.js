@@ -54,7 +54,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Fetch error:', error);
-            alert(`無法連接到後端服務: ${error.message}`);
+            const debugInfo = error.debug ? ` (K線數: ${error.debug.klinesCount})` : '';
+            alert(`發生錯誤: ${error.message}${debugInfo}`);
         } finally {
             loading.style.display = 'none';
             
