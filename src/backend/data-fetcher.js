@@ -157,9 +157,13 @@ async function fetchYahooKlines(symbol, interval) {
     };
 
     const yahooInterval = intervalMap[interval] || '1d';
-    // 之前用 1mo 在 5分線可能導致資料點不足 60 根 (5分線 1個月大約有幾千根，但 Yahoo 有時有限制頻率)
-    // 這裡我們確保針對分線抓取至少 1 個月的資料，針對日線抓取 1 年
-    const range = (yahooInterval.includes('m')) ? '1mo' : '1y'; 
+    // 解決 429 與資料量不足：
+    // 短週期 (5m, 15m) 如果抓 1mo 可能會被 Yahoo 拒絕 API 請求
+    // 我們改用更精確的範圍：5m 與 15m 只需要最近 5 天就超過 100 根 K 線了
+    let range = '1mo';
+    if (yahooInterval === '5m' || yahooInterval === '15m') range = '5d';
+    else if (yahooInterval === '60m') range = '1mo';
+    else if (yahooInterval === '1d') range = '1y'; 
 
     try {
         // 使用 yfinance 公開 API 或類似的 endpoint
