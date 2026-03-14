@@ -7,27 +7,88 @@ const axios = require('axios');
  * @returns {Promise<Array>} OHLCV 資料
  */
 async function fetchBinanceKlines(symbol, interval) {
-    try {
-        const response = await axios.get('https://api.binance.com/api/v3/klines', {
-            params: {
-                symbol: symbol,
-                interval: interval,
-                limit: 100 // 獲取足夠計算指標的量 (SMA60 需要至少 60 根)
-            }
-        });
-        
-        return response.data.map(d => ({
-            time: d[0],
-            open: parseFloat(d[1]),
-            high: parseFloat(d[2]),
-            low: parseFloat(d[3]),
-            close: parseFloat(d[4]),
-            volume: parseFloat(d[5])
-        }));
-    } catch (error) {
-        console.error('Error fetching Binance data:', error.message);
-        throw error;
+    const endpoints = [
+        'https://api.binance.com',
+        'https://api1.binance.com',
+        'https://api2.binance.com',
+        'https://api3.binance.com'
+    ];
+
+    let lastError;
+    for (const base of endpoints) {
+        try {
+            const response = await axios.get(`${base}/api/v3/klines`, {
+                params: {
+                    symbol: symbol,
+                    interval: interval,
+                    limit: 100
+                },
+                timeout: 5000
+            });
+            return response.data.map(d => ({
+                time: d[0],
+                open: parseFloat(d[1]),
+                high: parseFloat(d[2]),
+                low: parseFloat(d[3]),
+                close: parseFloat(d[4]),
+                volume: parseFloat(d[5])
+            }));
+        } catch (error) {
+            lastError = error;
+            // 如果是 451 (法律因素區域封鎖)，繼續嘗試下一個端點，或者如果全部失敗則噴錯
+            console.warn(`Binance endpoint ${base} failed: ${error.message}`);
+            if (error.response && error.response.status !== 451) break; 
+        }
     }
+    
+    // 如果 Binance 全部失敗且是 451，嘗試使用 CryptoCompare 作為備援
+    if (lastError && lastError.response && lastError.response.status === 451) {
+        console.warn('Binance regional block (451), attempting CryptoCompare fallback...');
+        try {
+            return await fetchCryptoCompareKlines(symbol, interval);
+        } catch (ccError) {
+            throw new Error(`比特幣資料獲取失敗。Binance 區域封鎖 (451) 且備援 API 亦失效: ${ccError.message}`);
+        }
+    }
+    throw lastError;
+}
+
+/**
+ * CryptoCompare 備援機制 (無區域限制)
+ */
+async function fetchCryptoCompareKlines(symbol, interval) {
+    const coin = symbol.replace('USDT', '').toUpperCase();
+    const limit = 100;
+    
+    // 週期映射 (CryptoCompare API)
+    let url = 'https://min-api.cryptocompare.com/data/v2/histominute';
+    let aggregate = 1;
+
+    if (interval === '5m') aggregate = 5;
+    else if (interval === '15m') aggregate = 15;
+    else if (interval === '1h') { url = 'https://min-api.cryptocompare.com/data/v2/histohour'; aggregate = 1; }
+    else if (interval === '4h') { url = 'https://min-api.cryptocompare.com/data/v2/histohour'; aggregate = 4; }
+    else if (interval === '1d') { url = 'https://min-api.cryptocompare.com/data/v2/histoday'; aggregate = 1; }
+
+    const response = await axios.get(url, {
+        params: {
+            fsym: coin === 'BITCOIN' ? 'BTC' : coin,
+            tsym: 'USDT',
+            limit: limit,
+            aggregate: aggregate
+        }
+    });
+
+    if (response.data.Response === 'Error') throw new Error(response.data.Message);
+
+    return response.data.Data.Data.map(d => ({
+        time: d.time * 1000,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+        volume: d.volumeto
+    }));
 }
 
 /**
