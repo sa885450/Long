@@ -5,6 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const resultArea = document.getElementById('result-area');
     const loading = document.getElementById('loading');
 
+    // 判定 API 網址：如果是在 GitHub Pages 上，則需要手動指定您的 Render API 網址
+    // 您可以在部署完 Render 後，回過頭來修改這裡的 'https://your-app-name.onrender.com'
+    const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? '' 
+        : 'https://long-4q43.onrender.com'; 
+
     let currentSymbol = 'bitcoin';
     let currentInterval = '1h';
 
@@ -32,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resultArea.style.display = 'none';
 
         try {
-            const response = await fetch(`/api/analyze?symbol=${currentSymbol}&interval=${currentInterval}`);
+            const response = await fetch(`${API_BASE_URL}/api/analyze?symbol=${currentSymbol}&interval=${currentInterval}`);
             const data = await response.json();
 
             if (data.success) {
