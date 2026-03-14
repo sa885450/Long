@@ -8,6 +8,19 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSymbol = 'bitcoin';
     let currentInterval = '1h';
 
+    /**
+     * CORS Proxy Fetch 轉發器 (使用 allOrigins)
+     * 用於解決瀏覽器無法直接 Fetch 第三方 API 的 CORS 限制
+     */
+    async function corsProxyFetch(url) {
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error(`Proxy Fetch Failed: ${response.status}`);
+        const data = await response.json();
+        // allOrigins 會將原始 JSON 字串放在 data.contents 中
+        return JSON.parse(data.contents);
+    }
+
     // 選擇商品
     symbolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -81,8 +94,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const binanceInterval = mapping[interval] || '1h';
         const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${binanceInterval}&limit=100`;
         
-        const res = await fetch(url);
-        const data = await res.json();
+        // 直接 Fetch 如果失敗 (通常是 CORS)，則走 Proxy
+        try {
+            const res = await fetch(url);
+            if (res.ok) {
+                const data = await res.json();
+                return data.map(d => ({ close: parseFloat(d[4]), time: d[0] }));
+            }
+        } catch (e) {
+            console.warn('Direct fetch failed, trying CORS Proxy for Binance...');
+        }
+        
+        const data = await corsProxyFetch(url);
         return data.map(d => ({
             close: parseFloat(d[4]),
             time: d[0]
@@ -93,20 +116,24 @@ document.addEventListener('DOMContentLoaded', () => {
      * 前端資料獲取: 台股 (透過 CORS Proxy 或 FinMind)
      */
     async function fetchStockKlines(symbol, interval) {
-        // 前端直接呼叫 Yahoo Finance 通常會被 CORS 擋住
-        // 因此這裡轉向 FinMind 的公開 API (對前端較友善)
         const now = new Date();
-        const startDate = new Date(now.getTime() - (60 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-        const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockMonth&data_id=0050&start_date=${startDate}`;
+        // 為了確保即便在連假期間也有足夠的日線資料 (SMA60)，我們抓取最近 120 天
+        const startDate = new Date(now.getTime() - (120 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        // 改用 TaiwanStockDaily，因為 Month 資料集更新較慢，Daily 在盤後或隔日也能給出資料
+        const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockDaily&data_id=0050&start_date=${startDate}`;
         
-        const res = await fetch(url);
-        const json = await res.json();
-        if (!json.data || json.data.length === 0) throw new Error('無法取得台股資料 (FinMind 限制)');
-        
-        return json.data.map(d => ({
-            close: d.close,
-            time: new Date(d.date).getTime()
-        }));
+        try {
+            const data = await corsProxyFetch(url);
+            if (!data.data || data.data.length === 0) throw new Error('FinMind API 無回傳資料');
+            
+            return data.data.map(d => ({
+                close: d.close,
+                time: new Date(d.date).getTime()
+            }));
+        } catch (e) {
+            console.error('Stock fetch fail:', e);
+            throw new Error(`獲取台股資料失敗: ${e.message}。可能是資料供應商限制，請稍後重試。`);
+        }
     }
 
     /**
