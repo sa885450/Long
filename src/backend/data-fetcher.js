@@ -157,13 +157,14 @@ async function fetchYahooKlines(symbol, interval) {
     };
 
     const yahooInterval = intervalMap[interval] || '1d';
-    // 解決 429 與資料量不足：
-    // 短週期 (5m, 15m) 如果抓 1mo 可能會被 Yahoo 拒絕 API 請求
-    // 我們改用更精確的範圍：5m 與 15m 只需要最近 5 天就超過 100 根 K 線了
+    
+    // 強化抓取邏輯：確保有足夠的 K 線數量 (>100)
+    // Yahoo Finance 對於 intra-day 資料的 range 有嚴格限制
     let range = '1mo';
-    if (yahooInterval === '5m' || yahooInterval === '15m') range = '5d';
-    else if (yahooInterval === '60m') range = '1mo';
-    else if (yahooInterval === '1d') range = '1y'; 
+    if (yahooInterval === '5m') range = '5d';       // 5m 抓 5天 (足以產出約 500+ 根)
+    else if (yahooInterval === '15m') range = '5d';  // 15m 抓 5天 (足以產出約 150+ 根)
+    else if (yahooInterval === '60m') range = '1mo'; // 1h 抓 1個月
+    else if (yahooInterval === '1d') range = '1y';  // 1d 抓 1年
 
     try {
         // 使用 yfinance 公開 API 或類似的 endpoint
