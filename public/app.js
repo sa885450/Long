@@ -8,17 +8,43 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSymbol = 'bitcoin';
     let currentInterval = '1h';
 
-    /**
-     * CORS Proxy Fetch 轉發器 (使用 allOrigins)
-     * 用於解決瀏覽器無法直接 Fetch 第三方 API 的 CORS 限制
-     */
     async function corsProxyFetch(url) {
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-        const response = await fetch(proxyUrl);
-        if (!response.ok) throw new Error(`Proxy Fetch Failed: ${response.status}`);
-        const data = await response.json();
-        // allOrigins 會將原始 JSON 字串放在 data.contents 中
-        return JSON.parse(data.contents);
+        // 多重代理清單，依序嘗試
+        const proxies = [
+            (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+            (u) => `https://thingproxy.freeboard.io/fetch/${u}`,
+            (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`
+        ];
+
+        let lastError;
+        for (const proxyGen of proxies) {
+            try {
+                const proxyUrl = proxyGen(url);
+                console.log(`[V2.2.0] Trying proxy: ${proxyUrl}`);
+                
+                // 加入 10 秒硬性超時
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                
+                const response = await fetch(proxyUrl, { signal: controller.signal });
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                
+                // 處理不同 Proxy 的回傳格式
+                // allOrigins 包在 contents
+                let content = data.contents || data;
+                if (typeof content === 'string') content = JSON.parse(content);
+                
+                return content;
+            } catch (err) {
+                lastError = err;
+                console.warn(`Proxy failed, trying next... Error: ${err.message}`);
+            }
+        }
+        throw new Error(`所有通訊代理皆失效 (${lastError.message})，請檢查網路或稍後再試。`);
     }
 
     // 選擇商品
@@ -117,14 +143,13 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function fetchStockKlines(symbol, interval) {
         const now = new Date();
-        // 為了確保即便在連假期間也有足夠的日線資料 (SMA60)，我們抓取最近 120 天
-        const startDate = new Date(now.getTime() - (120 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-        // 改用 TaiwanStockDaily，因為 Month 資料集更新較慢，Daily 在盤後或隔日也能給出資料
+        // 為了確保即便在連假期間也有足夠的日線資料 (SMA60)，我們抓取最近 90 天即可，減少傳輸量
+        const startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockDaily&data_id=0050&start_date=${startDate}`;
         
         try {
             const data = await corsProxyFetch(url);
-            if (!data.data || data.data.length === 0) throw new Error('FinMind API 無回傳資料');
+            if (!data || !data.data || data.data.length === 0) throw new Error('伺服器無回傳有效 K 線');
             
             return data.data.map(d => ({
                 close: d.close,
@@ -132,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }));
         } catch (e) {
             console.error('Stock fetch fail:', e);
-            throw new Error(`獲取台股資料失敗: ${e.message}。可能是資料供應商限制，請稍後重試。`);
+            throw e;
         }
     }
 
