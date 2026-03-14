@@ -167,14 +167,15 @@ async function fetchYahooKlines(symbol, interval) {
     else if (yahooInterval === '1d') range = '1y';  // 1d 抓 1年
 
     try {
-        // 先隨機休眠 500-1500ms，錯開請求峰值
-        await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
+        // 先隨機休眠 1000-3000ms，大幅錯開請求峰值
+        await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
         
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
         console.log(`[FETCH] Yahoo: ${url} (interval:${yahooInterval}, range:${range})`);
         const response = await axios.get(url, {
             params: { interval: yahooInterval, range: range },
-            timeout: 10000
+            timeout: 12000,
+            validateStatus: (status) => status < 500 // 允許 429 透過以供 catch 捕捉
         });
 
         const result = response.data.chart.result[0];

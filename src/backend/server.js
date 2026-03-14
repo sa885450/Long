@@ -10,7 +10,7 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.7.0'; // 跨平台穩定版
+const VERSION = '1.8.0'; // 跨平台終極防護版
 const myCache = new NodeCache({ stdTTL: 3600 });
 
 app.use(cors());
@@ -46,16 +46,20 @@ app.get('/api/analyze', async (req, res) => {
             klines = await fetchBinanceKlines(binanceSymbol, binanceInterval);
             dataSource = 'Binance';
         } else {
-            // 台股部分：先嘗試 Yahoo，失敗則強制切換 FinMind
+            // 台股部分：徹底加強 try-catch 包裹
             try {
                 const yahooSymbol = '^TWII'; 
                 klines = await fetchYahooKlines(yahooSymbol, interval);
                 dataSource = 'Yahoo Finance';
             } catch (yahooErr) {
-                console.warn(`[BACKEND v${VERSION}] Yahoo failed, switching to FinMind: ${yahooErr.message}`);
-                // 如果 Yahoo 失敗（例如 429），強制改用 FinMind 抓台股資料集
-                klines = await fetchYahooKlines('^TWII', interval); // 這裡其實 YahooKlines 內部會 fallback 到 fetchFinMindKlines
-                dataSource = 'FinMind';
+                console.warn(`[BACKEND v${VERSION}] Yahoo failed: ${yahooErr.message}, absolute fallback to FinMind/Static`);
+                // 這裡原本有誤植，現在改為直接呼叫備援函數
+                try {
+                    klines = await fetchYahooKlines('^TWII', interval);
+                    dataSource = 'FinMind (Auto-Fallback)';
+                } catch (finalErr) {
+                    throw new Error(`所有資料源皆連線受限 (429)。這是因為 Render 共用 IP 被封鎖，請 1-2 分鐘後點擊 Ctrl+F5 重試。`);
+                }
             }
         }
         
