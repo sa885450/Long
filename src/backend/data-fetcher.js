@@ -15,14 +15,11 @@ async function fetchBinanceKlines(symbol, interval) {
     ];
 
     let lastError;
+    // 1. 嘗試所有 Binance 端點
     for (const base of endpoints) {
         try {
             const response = await axios.get(`${base}/api/v3/klines`, {
-                params: {
-                    symbol: symbol,
-                    interval: interval,
-                    limit: 100
-                },
+                params: { symbol, interval, limit: 100 },
                 timeout: 5000
             });
             return response.data.map(d => ({
@@ -35,31 +32,43 @@ async function fetchBinanceKlines(symbol, interval) {
             }));
         } catch (error) {
             lastError = error;
-            // 如果是 451 (法律因素區域封鎖)，繼續嘗試下一個端點，或者如果全部失敗則噴錯
             console.warn(`Binance endpoint ${base} failed: ${error.message}`);
-            if (error.response && error.response.status !== 451) break; 
+            // 如果不是區域封鎖 (451)，通常是頻度限制或其他問題，直接跳出嘗試備援
+            if (error.response && error.response.status !== 451) break;
+        }
+    }
+
+    // 如果 Binance 失敗且是區域封鎖 (451)，啟動備援鏈
+    if (lastError && lastError.response && lastError.response.status === 451) {
+        console.warn('Binance regional block (451), starting fallback chain...');
+        
+        // 2. 備援 A: CryptoCompare
+        try {
+            console.log('Attempting CryptoCompare...');
+            return await fetchCryptoCompareKlines(symbol, interval);
+        } catch (ccError) {
+            console.warn(`CryptoCompare failed: ${ccError.message}, trying OKX...`);
+            
+            // 3. 備援 B: OKX
+            try {
+                console.log('Attempting OKX...');
+                return await fetchOKXKlines(symbol, interval);
+            } catch (okxError) {
+                console.warn(`OKX failed: ${okxError.message}, trying Yahoo Finance...`);
+                
+                // 4. 最後備援: Yahoo Finance
+                try {
+                    console.log('Attempting Yahoo Finance (Final Fallback)...');
+                    return await fetchYahooKlines('BTC-USD', interval);
+                } catch (yahooError) {
+                    throw new Error(`比特幣資料獲取失敗。已嘗試 Binance(451)、CryptoCompare、OKX 與 Yahoo Finance 皆失效。最後錯誤: ${yahooError.message}`);
+                }
+            }
         }
     }
     
-    // 如果 Binance 全部失敗且是 451，嘗試使用 CryptoCompare 作為備援
-    if (lastError && lastError.response && lastError.response.status === 451) {
-        console.warn('Binance regional block (451), attempting CryptoCompare fallback...');
-        try {
-            return await fetchCryptoCompareKlines(symbol, interval);
-        } catch (ccError) {
-            console.warn(`CryptoCompare failed: ${ccError.message}, attempting OKX fallback...`);
-            try {
-                return await fetchOKXKlines(symbol, interval);
-            } catch (okxError) {
-                // 原本的 Yahoo Fallback 邏輯移到這下面
-    // 4. 最後的最後：Yahoo Finance
-    console.warn(`OKX failed: ${okxError.message}, attempting Yahoo Finance (final fallback)...`);
-    try {
-        const yahooBtcSymbol = 'BTC-USD';
-        return await fetchYahooKlines(yahooBtcSymbol, interval);
-    } catch (yahooError) {
-        throw new Error(`比特幣資料獲取失敗。已嘗試 Binance, CryptoCompare, OKX 與 Yahoo Finance 皆失效。最後錯誤: ${yahooError.message}`);
-    }
+    // 如果不是 451 卻失敗了 (例如 429)，直接拋出最後一個錯誤
+    throw lastError;
 }
 
 /**
@@ -91,10 +100,6 @@ async function fetchOKXKlines(symbol, interval) {
         close: parseFloat(d[4]),
         volume: parseFloat(d[5])
     })).reverse(); // OKX 回傳順序是倒序
-}
-        }
-    }
-    throw lastError;
 }
 
 /**
