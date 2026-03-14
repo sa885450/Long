@@ -9,13 +9,9 @@ function analyzeLongStrategy(klines) {
 
     // 1. 計算 SMA10
     const sma10Values = SMA.calculate({ period: 10, values: closes });
-    const currentSMA10 = sma10Values[sma10Values.length - 1];
-    const prevSMA10 = sma10Values[sma10Values.length - 2];
 
     // 2. 計算 SMA60
     const sma60Values = SMA.calculate({ period: 60, values: closes });
-    const currentSMA60 = sma60Values[sma60Values.length - 1];
-    const prevSMA60 = sma60Values[sma60Values.length - 2];
 
     // 3. 計算 MACD
     const macdInput = {
@@ -27,8 +23,22 @@ function analyzeLongStrategy(klines) {
         SimpleMASignal: false
     };
     const macdValues = MACD.calculate(macdInput);
+    
+    // --- 安全檢查 ---
+    if (sma10Values.length < 2 || sma60Values.length < 2 || macdValues.length < 2) {
+        throw new Error('計算指標所需的 K 線資料不足（SMA60 需要至少 60 根資料）。請嘗試切換週期或稍後再試。');
+    }
+
+    const currentSMA10 = sma10Values[sma10Values.length - 1];
+    const prevSMA10 = sma10Values[sma10Values.length - 2];
+    const currentSMA60 = sma60Values[sma60Values.length - 1];
+    const prevSMA60 = sma60Values[sma60Values.length - 2];
     const currentMACD = macdValues[macdValues.length - 1];
     const prevMACD = macdValues[macdValues.length - 2];
+
+    if (!currentMACD || !prevMACD) {
+        throw new Error('無法計算 MACD 指標。');
+    }
 
     // --- 判斷條件 (做多) ---
     
