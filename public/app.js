@@ -34,17 +34,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await response.json();
                 
                 // 處理不同 Proxy 的回傳格式
-                // allOrigins 包在 contents
                 let content = data.contents || data;
-                if (typeof content === 'string') content = JSON.parse(content);
+                if (typeof content === 'string') {
+                    try {
+                        content = JSON.parse(content);
+                    } catch (e) {
+                        // 如果解析失敗，可能是 Proxy 回傳了字串形式的錯誤訊息
+                        throw new Error(`Proxy returned invalid JSON: ${content.substring(0, 100)}`);
+                    }
+                }
                 
+                // 檢查 FinMind 特有的錯誤狀態
+                if (content && content.status === 429) {
+                    throw new Error("FinMind API 頻率限制 (429)，請 1 分鐘後再試。");
+                }
+
                 return content;
             } catch (err) {
                 lastError = err;
-                console.warn(`Proxy failed, trying next... Error: ${err.message}`);
+                console.warn(`[V2.3.0] Proxy failed, trying next... Error: ${err.message}`);
+                // 如果是明確的 429，則不用試其他代理了（因為是 API 端的限制）
+                if (err.message.includes("429")) break;
             }
         }
-        throw new Error(`所有通訊代理皆失效 (${lastError.message})，請檢查網路或稍後再試。`);
+        throw new Error(lastError ? lastError.message : "通訊異常");
     }
 
     // 選擇商品
@@ -143,22 +156,39 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function fetchStockKlines(symbol, interval) {
         const now = new Date();
-        // 為了確保即便在連假期間也有足夠的日線資料 (SMA60)，我們抓取最近 90 天即可，減少傳輸量
-        const startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-        const url = `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockDaily&data_id=0050&start_date=${startDate}`;
+        const startDate = new Date(now.getTime() - (120 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         
-        try {
-            const data = await corsProxyFetch(url);
-            if (!data || !data.data || data.data.length === 0) throw new Error('伺服器無回傳有效 K 線');
-            
-            return data.data.map(d => ({
-                close: d.close,
-                time: new Date(d.date).getTime()
-            }));
-        } catch (e) {
-            console.error('Stock fetch fail:', e);
-            throw e;
+        // 策略：依序嘗試不同資料集 (0050 是最穩的現貨代表，TXF 是期貨)
+        const datasets = [
+            { ds: 'TaiwanStockDaily', id: '0050', name: '0050現貨' },
+            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: '台指期貨' }
+        ];
+
+        let lastErr;
+        for (const target of datasets) {
+            try {
+                const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
+                console.log(`[V2.3.0] Fetching ${target.name} from FinMind...`);
+                
+                const data = await corsProxyFetch(url);
+                
+                if (data && data.data && data.data.length >= 60) {
+                    console.log(`[V2.3.0] Successfully fetched ${data.data.length} klines from ${target.name}`);
+                    return data.data.map(d => ({
+                        close: d.close,
+                        time: new Date(d.date || d.time).getTime()
+                    }));
+                } else {
+                    console.warn(`${target.name} data insufficient or empty.`);
+                }
+            } catch (e) {
+                lastErr = e;
+                console.error(`${target.name} fetch failed:`, e.message);
+                if (e.message.includes("429")) throw e; // 快速跳出
+            }
         }
+
+        throw new Error(`無法獲取台股資料。原因: ${lastErr ? lastErr.message : '所有備援水源皆無效'}。提示：週末休市期間，系統已自動嘗試抓取期貨資料但亦受限。`);
     }
 
     /**
