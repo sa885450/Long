@@ -47,13 +47,51 @@ async function fetchBinanceKlines(symbol, interval) {
         try {
             return await fetchCryptoCompareKlines(symbol, interval);
         } catch (ccError) {
-            console.warn(`CryptoCompare failed: ${ccError.message}, attempting Yahoo Finance (final fallback)...`);
+            console.warn(`CryptoCompare failed: ${ccError.message}, attempting OKX fallback...`);
             try {
-                const yahooBtcSymbol = 'BTC-USD';
-                return await fetchYahooKlines(yahooBtcSymbol, interval);
-            } catch (yahooError) {
-                throw new Error(`比特幣資料獲取失敗。已嘗試 Binance (451)、CryptoCompare (Rate Limit) 與 Yahoo Finance 皆失效。錯誤: ${yahooError.message}`);
-            }
+                return await fetchOKXKlines(symbol, interval);
+            } catch (okxError) {
+                // 原本的 Yahoo Fallback 邏輯移到這下面
+    // 4. 最後的最後：Yahoo Finance
+    console.warn(`OKX failed: ${okxError.message}, attempting Yahoo Finance (final fallback)...`);
+    try {
+        const yahooBtcSymbol = 'BTC-USD';
+        return await fetchYahooKlines(yahooBtcSymbol, interval);
+    } catch (yahooError) {
+        throw new Error(`比特幣資料獲取失敗。已嘗試 Binance, CryptoCompare, OKX 與 Yahoo Finance 皆失效。最後錯誤: ${yahooError.message}`);
+    }
+}
+
+/**
+ * OKX 備援機制 (通常對雲端 IP 較友好)
+ */
+async function fetchOKXKlines(symbol, interval) {
+    const okxIntervalMap = {
+        '5m': '5m',
+        '15m': '15m',
+        '1h': '1H',
+        '4h': '4H',
+        '1d': '1D'
+    };
+    const instId = symbol.replace('USDT', '-USDT').toUpperCase();
+    const bar = okxIntervalMap[interval] || '1D';
+
+    const response = await axios.get('https://www.okx.com/api/v5/market/candles', {
+        params: { instId, bar, limit: 100 },
+        timeout: 5000
+    });
+
+    if (response.data.code !== "0") throw new Error(response.data.msg);
+
+    return response.data.data.map(d => ({
+        time: parseInt(d[0]),
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4]),
+        volume: parseFloat(d[5])
+    })).reverse(); // OKX 回傳順序是倒序
+}
         }
     }
     throw lastError;

@@ -6,7 +6,7 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const myCache = new NodeCache({ stdTTL: 60 }); // 快取 60 秒
+const myCache = new NodeCache({ stdTTL: 120 }); // 快取延長至 120 秒
 
 app.use(cors());
 app.use(express.json());
