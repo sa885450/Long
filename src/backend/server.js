@@ -44,7 +44,7 @@ app.get('/api/analyze', async (req, res) => {
             klines = await fetchYahooKlines(yahooSymbol, interval);
         }
 
-        }
+
 
         console.log(`[BACKEND v${VERSION}] Fetched ${klines.length} klines for ${symbol} @ ${interval}`);
         
