@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量化交易訊號判別工具</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-glow"></div>
+    
+    <main class="app-container">
+        <!-- 側邊欄控制面板 -->
+        <aside class="sidebar glass">
+            <div class="sidebar-header">
+                <h2>參數設定</h2>
+            </div>
+            
+            <div class="control-group">
+                <label>商品</label>
+                <div class="selector" id="symbol-selector">
+                    <button class="select-btn active" data-value="bitcoin">比特幣</button>
+                    <button class="select-btn" data-value="twii">台指期</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>策略</label>
+                <div class="selector">
+                    <button class="select-btn active">SMA + MACD</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>週期</label>
+                <div class="selector" id="interval-selector">
+                    <button class="select-btn" data-value="5m">5分</button>
+                    <button class="select-btn" data-value="15m">15分</button>
+                    <button class="select-btn active" data-value="1h">1小時</button>
+                    <button class="select-btn" data-value="4h">4小時</button>
+                    <button class="select-btn" data-value="1d">天</button>
+                </div>
+            </div>
+
+            <button id="execute-btn" class="execute-btn">執行</button>
+        </aside>
+
+        <!-- 主內容顯示區 -->
+        <section class="main-content">
+            <header class="content-header glass">
+                <h1>量化交易訊號判別工具 <small>(多頭策略版)</small></h1>
+                <p class="strategy-mode">當前模式：<span>先只看做多</span></p>
+            </header>
+
+            <div class="strategy-details glass">
+                <h3>策略判定條件</h3>
+                <ul class="condition-list">
+                    <li><span class="dot"></span> 條件 1：商品價格在 SMA60 之上</li>
+                    <li><span class="dot"></span> 條件 2：SMA10 趨勢向上且在 SMA60 之上</li>
+                    <li><span class="dot"></span> 條件 3：MACD 快線趨勢向上且在慢線之上</li>
+                </ul>
+            </div>
+
+            <!-- 結果顯示區 -->
+            <div id="result-area" class="result-container" style="display: none;">
+                <div class="result-card glass" id="summary-card">
+                    <div class="result-status">
+                        <span class="label">商品可否下單：</span>
+                        <span id="final-decision" class="status-badge">符合</span>
+                    </div>
+                </div>
+
+                <div class="details-grid">
+                    <div class="detail-card glass">
+                        <h4>SMA10 狀態</h4>
+                        <div class="value-row">
+                            <span class="num" id="sma10-val">0.00</span>
+                            <span class="trend" id="sma10-trend">向上</span>
+                        </div>
+                    </div>
+                    <div class="detail-card glass">
+                        <h4>SMA60 狀態</h4>
+                        <div class="value-row">
+                            <span class="num" id="sma60-val">0.00</span>
+                            <span class="trend" id="sma60-trend">向上</span>
+                        </div>
+                    </div>
+                    <div class="detail-card glass full-width">
+                        <h4>MACD 狀態</h4>
+                        <div class="macd-row">
+                            <div class="macd-item">快線: <span id="macd-fast">0.00</span></div>
+                            <div class="macd-item">慢線: <span id="macd-signal">0.00</span></div>
+                            <div class="macd-status">快線向上且在慢線之上: <span id="macd-bullish">是</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="loading" class="loading-overlay" style="display: none;">
+                <div class="spinner"></div>
+                <p>正在分析資料...</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

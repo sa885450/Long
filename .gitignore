@@ -1,0 +1,6 @@
+node_modules/
+.venv/
+.env
+*.sqlite
+dist/
+.DS_Store
