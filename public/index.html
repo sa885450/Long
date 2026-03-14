@@ -49,25 +49,39 @@
         <!-- 主內容顯示區 -->
         <section class="main-content">
             <header class="content-header glass">
-                <h1>量化交易訊號判別工具 <small>(多頭策略版)</small></h1>
-                <p class="strategy-mode">當前模式：<span>先只看做多</span></p>
+                <h1>量化交易訊號判別工具 <small>(多空雙向版)</small></h1>
+                <p class="strategy-mode">當前模式：<span>主動判斷做多或做空</span></p>
             </header>
 
-            <div class="strategy-details glass">
-                <h3>策略判定條件</h3>
-                <ul class="condition-list">
-                    <li><span class="dot"></span> 條件 1：商品價格在 SMA60 之上</li>
-                    <li><span class="dot"></span> 條件 2：SMA10 趨勢向上且在 SMA60 之上</li>
-                    <li><span class="dot"></span> 條件 3：MACD 快線趨勢向上且在慢線之上</li>
-                </ul>
+            <div class="strategy-comparison glass">
+                <div class="strategy-box" id="long-strategy">
+                    <h3 class="strategy-title long">做多條件</h3>
+                    <ul class="condition-list">
+                        <li id="cond-l1"><span class="dot"></span> 條件 1：商品價格在 SMA60 之上</li>
+                        <li id="cond-l2"><span class="dot"></span> 條件 2：SMA10 趨勢向上且在 SMA60 之上</li>
+                        <li id="cond-l3"><span class="dot"></span> 條件 3：MACD 快線趨勢向上且在慢線之上</li>
+                    </ul>
+                </div>
+                <div class="strategy-box" id="short-strategy">
+                    <h3 class="strategy-title short">做空條件</h3>
+                    <ul class="condition-list">
+                        <li id="cond-s1"><span class="dot"></span> 條件 1：商品價格在 SMA60 之下</li>
+                        <li id="cond-s2"><span class="dot"></span> 條件 2：SMA10 趨勢向下且在 SMA60 之下</li>
+                        <li id="cond-s3"><span class="dot"></span> 條件 3：MACD 快線趨勢向下且在慢線之下</li>
+                    </ul>
+                </div>
             </div>
 
             <!-- 結果顯示區 -->
             <div id="result-area" class="result-container" style="display: none;">
                 <div class="result-card glass" id="summary-card">
                     <div class="result-status">
-                        <span class="label">商品可否下單：</span>
-                        <span id="final-decision" class="status-badge">符合</span>
+                        <span class="label">商品是否可下單：</span>
+                        <span id="final-decision" class="status-badge">不符合</span>
+                    </div>
+                    <div class="direction-status">
+                        <span class="label">方向建議：</span>
+                        <span id="direction-advice" class="status-badge">無</span>
                     </div>
                 </div>
 

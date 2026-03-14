@@ -155,13 +155,37 @@ body {
     font-weight: 600;
 }
 
-.strategy-details {
-    padding: 2rem;
+.strategy-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
 }
 
-.strategy-details h3 {
+.strategy-box {
+    padding: 1.5rem;
+    border-radius: 1rem;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.strategy-box.active-strategy {
+    border-color: var(--accent-yellow);
+    box-shadow: 0 0 20px rgba(250, 204, 21, 0.1);
+}
+
+.strategy-title {
     margin-bottom: 1rem;
     font-size: 1.1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.strategy-title.long {
+    color: var(--success-green);
+}
+
+.strategy-title.short {
+    color: #f87171; /* 紅色 */
 }
 
 .condition-list {
@@ -176,6 +200,16 @@ body {
     align-items: center;
     gap: 1rem;
     color: var(--text-dim);
+    font-size: 0.9rem;
+}
+
+.condition-list li.met {
+    color: var(--text-main);
+}
+
+.condition-list li.met .dot {
+    background-color: var(--success-green);
+    box-shadow: 0 0 8px var(--success-green);
 }
 
 .dot {
@@ -194,8 +228,15 @@ body {
 }
 
 .result-card {
-    padding: 2rem;
-    text-align: center;
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+}
+
+.result-status, .direction-status {
+    display: flex;
+    align-items: center;
 }
 
 .status-badge {

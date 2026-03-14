@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const proxyGen of proxies) {
             try {
                 const proxyUrl = proxyGen(url);
-                console.log(`[V2.6.0] Trying ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
+                console.log(`[V3.0.0] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
                 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     try {
                         content = JSON.parse(content);
                     } catch (e) {
-                         if (isYahoo) return content; // Yahoo 有時會被包裝成字串
+                         if (isYahoo) return content;
                          throw new Error(`Parse Failed: ${content.substring(0, 30)}`);
                     }
                 }
@@ -103,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`發生錯誤: ${error.message}`);
         } finally {
             loading.style.display = 'none';
-            let cooldown = 3; // 縮短冷卻時間
+            let cooldown = 3;
             const timer = setInterval(() => {
                 executeBtn.innerText = `冷卻中 (${cooldown}s)`;
                 cooldown--;
@@ -150,7 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchStockKlines(symbol, interval) {
-        // 優先嘗試 Yahoo
         try {
             return await fetchYahooKlinesFrontEnd('^TWII');
         } catch (e) {
@@ -184,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (e.message.includes("429")) throw e;
             }
         }
-        throw new Error("無法取得台股資料。建議週一市場開盤後再試，或檢查網路連線。");
+        throw new Error("無法取得台股資料。建議稍後再試。");
     }
 
     function performAnalysis(klines) {
@@ -225,32 +224,84 @@ document.addEventListener('DOMContentLoaded', () => {
         const currDEA = dea[dea.length - 1];
         const prevDIF = dif[dif.length - 2];
 
-        const cond1 = lastPrice > currSMA60;
-        const cond2 = (currSMA10 > currSMA60) && (currSMA10 > prevSMA10);
-        const cond3 = (currDIF > currDEA) && (currDIF > prevDIF);
+        // 做多條件 (Long)
+        const l1 = lastPrice > currSMA60;
+        const l2 = (currSMA10 >= currSMA60) && (currSMA10 > prevSMA10);
+        const l3 = (currDIF > currDEA) && (currDIF > prevDIF);
+
+        // 做空條件 (Short)
+        const s1 = lastPrice < currSMA60;
+        const s2 = (currSMA10 <= currSMA60) && (currSMA10 < prevSMA10);
+        const s3 = (currDIF < currDEA) && (currDIF < prevDIF);
 
         return {
             success: true,
-            isMatch: cond1 && cond2 && cond3,
+            isLong: l1 && l2 && l3,
+            isShort: s1 && s2 && s3,
+            conditions: {
+                long: [l1, l2, l3],
+                short: [s1, s2, s3]
+            },
             summary: {
                 lastPrice,
                 sma10: { value: currSMA10.toFixed(2), trend: currSMA10 > prevSMA10 ? '向上' : '向下' },
                 sma60: { value: currSMA60.toFixed(2), trend: currSMA60 > prevSMA60 ? '向上' : '向下' },
-                macd: { fast: currDIF.toFixed(2), signal: currDEA.toFixed(2), isBullish: cond3 ? '是' : '否' }
+                macd: { fast: currDIF.toFixed(2), signal: currDEA.toFixed(2), isLongBull: l3, isShortBear: s3 }
             }
         };
     }
 
     function displayResults(data) {
-        document.getElementById('final-decision').textContent = data.isMatch ? '符合' : '不符合';
-        document.getElementById('final-decision').className = 'status-badge ' + (data.isMatch ? 'match' : 'no-match');
+        // 更新方向與下單建議
+        const decision = document.getElementById('final-decision');
+        const advice = document.getElementById('direction-advice');
+        
+        if (data.isLong) {
+            decision.textContent = '符合';
+            decision.className = 'status-badge match';
+            advice.textContent = '做多';
+            advice.className = 'status-badge match';
+            document.getElementById('long-strategy').classList.add('active-strategy');
+            document.getElementById('short-strategy').classList.remove('active-strategy');
+        } else if (data.isShort) {
+            decision.textContent = '符合';
+            decision.className = 'status-badge match';
+            advice.textContent = '做空';
+            advice.className = 'status-badge no-match';
+            document.getElementById('short-strategy').classList.add('active-strategy');
+            document.getElementById('long-strategy').classList.remove('active-strategy');
+        } else {
+            decision.textContent = '不符合';
+            decision.className = 'status-badge no-match';
+            advice.textContent = '無';
+            advice.className = 'status-badge';
+            document.getElementById('long-strategy').classList.remove('active-strategy');
+            document.getElementById('short-strategy').classList.remove('active-strategy');
+        }
+
+        // 更新各別條件指示燈
+        const updateConds = (prefix, conds) => {
+            conds.forEach((c, i) => {
+                const el = document.getElementById(`cond-${prefix.charAt(0)}${i+1}`);
+                if (c) el.classList.add('met');
+                else el.classList.remove('met');
+            });
+        };
+        updateConds('long', data.conditions.long);
+        updateConds('short', data.conditions.short);
+
+        // 更新指標面板
+        document.getElementById('sma10-val').textContent = data.summary.lastPrice.toFixed(0); // 這裡修正為收盤價，下方明細再放數值
         document.getElementById('sma10-val').textContent = data.summary.sma10.value;
         document.getElementById('sma10-trend').textContent = data.summary.sma10.trend;
         document.getElementById('sma60-val').textContent = data.summary.sma60.value;
         document.getElementById('sma60-trend').textContent = data.summary.sma60.trend;
         document.getElementById('macd-fast').textContent = data.summary.macd.fast;
         document.getElementById('macd-signal').textContent = data.summary.macd.signal;
-        document.getElementById('macd-bullish').textContent = data.summary.macd.isBullish;
+        
+        const macdStatusMsg = data.isLong ? '快線向上且在慢線之上: 是' : (data.isShort ? '快線向下且在慢線之下: 是' : '未達多空門檻');
+        document.querySelector('.macd-status span').textContent = macdStatusMsg;
+
         resultArea.style.display = 'block';
     }
 });
