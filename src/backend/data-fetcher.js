@@ -157,7 +157,9 @@ async function fetchYahooKlines(symbol, interval) {
     };
 
     const yahooInterval = intervalMap[interval] || '1d';
-    const range = yahooInterval === '1d' ? '1y' : '1mo'; // 根據週期決定抓取範圍
+    // 之前用 1mo 在 5分線可能導致資料點不足 60 根 (5分線 1個月大約有幾千根，但 Yahoo 有時有限制頻率)
+    // 這裡我們確保針對分線抓取至少 1 個月的資料，針對日線抓取 1 年
+    const range = (yahooInterval.includes('m')) ? '1mo' : '1y'; 
 
     try {
         // 使用 yfinance 公開 API 或類似的 endpoint
@@ -196,9 +198,10 @@ async function fetchYahooKlines(symbol, interval) {
  */
 async function fetchFinMindKlines(symbol, interval) {
     // 簡單映射，FinMind 通常需要日期範圍
-    const finMindSymbol = symbol.startsWith('^') ? 'TXF' : symbol; // 簡單假設 ^TWII 對應大台指
+    const finMindSymbol = symbol.startsWith('^') ? 'TXF' : symbol;
     const now = new Date();
-    const startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+    // 將 30 天擴大到 60 天，確保即便扣除假日，分線或日線資料也絕對超過 60 根
+    const startDate = new Date(now.getTime() - (60 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
 
     const response = await axios.get('https://api.finmindtrade.com/api/v4/data', {
         params: {
