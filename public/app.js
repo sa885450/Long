@@ -50,16 +50,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.success) {
                 displayResults(data);
             } else {
-                alert('發生錯誤: ' + data.message);
+                // 如果後端回傳 success: false，裡面會有我們定義的 debug
+                let msg = data.message;
+                if (data.debug) {
+                    msg += ` (版本: ${data.debug.version})`;
+                }
+                alert(`發生錯誤: ${msg}`);
             }
         } catch (error) {
-            console.error('Fetch error:', error);
-            let msg = error.message;
-            if (error.response && error.response.data && error.response.data.debug) {
-                const debug = error.response.data.debug;
-                msg += ` (K線數: ${debug.klinesCount || 0}, 版本: ${debug.version})`;
-            }
-            alert(`發生錯誤: ${msg}`);
+            console.error('Network/Parse error:', error);
+            alert(`網路連線異常或伺服器忙碌中，請稍後重試。`);
         } finally {
             loading.style.display = 'none';
             

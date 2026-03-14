@@ -10,8 +10,8 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.5.0'; // 429 防護版
-const myCache = new NodeCache({ stdTTL: 600 }); // 快取延長至 10 分鐘，降低 API 負擔
+const VERSION = '1.6.0'; // 極致快取 & 備援版
+const myCache = new NodeCache({ stdTTL: 3600 }); // 快取延長至 1 小時，極大化減少 API 請求
 
 app.use(cors());
 app.use(express.json());
@@ -77,9 +77,14 @@ app.get('/api/analyze', async (req, res) => {
         });
     } catch (error) {
         console.error(`[API ERROR v${VERSION}]:`, error.message);
-        res.status(500).json({ 
+        const isRateLimit = error.message.includes('429');
+        const customMsg = isRateLimit 
+            ? 'API 請求過於頻繁 (429)。系統已自動啟動 1 小時快取保護，請稍後幾分鐘再試。' 
+            : error.message;
+
+        res.status(isRateLimit ? 429 : 500).json({ 
             success: false, 
-            message: error.message,
+            message: customMsg,
             debug: { version: VERSION, error: error.message }
         });
     }
