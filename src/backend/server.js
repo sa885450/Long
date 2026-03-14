@@ -1,4 +1,8 @@
 const express = require('express');
+const axios = require('axios');
+
+// 加入隨機延遲，避免高頻請求導致 429
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const cors = require('cors');
 const NodeCache = require('node-cache');
 const { fetchBinanceKlines, fetchYahooKlines } = require('./data-fetcher');
@@ -6,8 +10,8 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.4.0'; // 週末穩定版
-const myCache = new NodeCache({ stdTTL: 120 });
+const VERSION = '1.5.0'; // 429 防護版
+const myCache = new NodeCache({ stdTTL: 600 }); // 快取延長至 10 分鐘，降低 API 負擔
 
 app.use(cors());
 app.use(express.json());
