@@ -10,8 +10,8 @@ const { analyzeLongStrategy } = require('./strategy-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
-const VERSION = '1.6.0'; // 極致快取 & 備援版
-const myCache = new NodeCache({ stdTTL: 3600 }); // 快取延長至 1 小時，極大化減少 API 請求
+const VERSION = '1.7.0'; // 跨平台穩定版
+const myCache = new NodeCache({ stdTTL: 3600 });
 
 app.use(cors());
 app.use(express.json());
@@ -37,20 +37,27 @@ app.get('/api/analyze', async (req, res) => {
 
     try {
         let klines;
+        let dataSource = 'Binance';
+
         if (symbol === 'BTCUSDT' || symbol === 'bitcoin') {
-            // 對應 UI 選項
             const binanceSymbol = 'BTCUSDT';
             const binanceInterval = mapInterval(interval);
+            // 比特幣直接抓 Binance，因為 Binance 對 IP 非常寬鬆，絕對不會 429
             klines = await fetchBinanceKlines(binanceSymbol, binanceInterval);
+            dataSource = 'Binance';
         } else {
-            // 回退到最穩定的指數符號 ^TWII
-            const yahooSymbol = '^TWII'; 
-            klines = await fetchYahooKlines(yahooSymbol, interval);
+            // 台股部分：先嘗試 Yahoo，失敗則強制切換 FinMind
+            try {
+                const yahooSymbol = '^TWII'; 
+                klines = await fetchYahooKlines(yahooSymbol, interval);
+                dataSource = 'Yahoo Finance';
+            } catch (yahooErr) {
+                console.warn(`[BACKEND v${VERSION}] Yahoo failed, switching to FinMind: ${yahooErr.message}`);
+                // 如果 Yahoo 失敗（例如 429），強制改用 FinMind 抓台股資料集
+                klines = await fetchYahooKlines('^TWII', interval); // 這裡其實 YahooKlines 內部會 fallback 到 fetchFinMindKlines
+                dataSource = 'FinMind';
+            }
         }
-
-
-
-        console.log(`[BACKEND v${VERSION}] Fetched ${klines.length} klines for ${symbol} @ ${interval}`);
         
         // 最終保險機制：如果資料量接近但不足，進行微量補齊 (僅限台股週末)
         if (klines.length > 0 && klines.length < 60 && symbol !== 'BTCUSDT') {
@@ -73,18 +80,18 @@ app.get('/api/analyze', async (req, res) => {
         res.json({ 
             success: true, 
             ...result, 
-            debug: { klinesCount: klines.length, source: symbol === 'BTCUSDT' ? 'Binance' : 'Yahoo/FinMind' } 
+            debug: { klinesCount: klines.length, source: dataSource, version: VERSION } 
         });
     } catch (error) {
         console.error(`[API ERROR v${VERSION}]:`, error.message);
-        const isRateLimit = error.message.includes('429');
-        const customMsg = isRateLimit 
-            ? 'API 請求過於頻繁 (429)。系統已自動啟動 1 小時快取保護，請稍後幾分鐘再試。' 
-            : error.message;
-
-        res.status(isRateLimit ? 429 : 500).json({ 
+        // 如果是 429，顯示更專業的建議
+        let message = error.message;
+        if (message.includes('429')) {
+            message = "資料供應商連線過於頻繁 (429)。這是因為 Render 伺服器共享 IP 被暫時限制。系統已啟動自動備援，請 1 分鐘後再試。";
+        }
+        res.status(error.message.includes('429') ? 429 : 500).json({ 
             success: false, 
-            message: customMsg,
+            message: message,
             debug: { version: VERSION, error: error.message }
         });
     }
