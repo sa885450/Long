@@ -31,7 +31,15 @@ app.get('/api/analyze', async (req, res) => {
         res.json({ success: true, ...result });
     } catch (error) {
         console.error('API Error:', error.message);
-        res.status(500).json({ success: false, message: error.message });
+        if (error.response) {
+            console.error('Data:', error.response.data);
+            console.error('Status:', error.response.status);
+        }
+        res.status(500).json({ 
+            success: false, 
+            message: error.message,
+            detail: error.response ? error.response.data : null 
+        });
     }
 });
 
