@@ -8,8 +8,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentSymbol = 'bitcoin';
     let currentInterval = '1h';
 
+    /**
+     * CORS Proxy Fetch 轉發器 (多重備援版)
+     */
     async function corsProxyFetch(url, isYahoo = false) {
-        // 多重代理清單
         const proxies = [
             (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
             (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
@@ -20,10 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
         for (const proxyGen of proxies) {
             try {
                 const proxyUrl = proxyGen(url);
-                console.log(`[V2.5.0] Trying proxy for ${isYahoo ? 'Yahoo' : 'FinMind'}: ${proxyUrl}`);
+                console.log(`[V2.6.0] Trying ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
                 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 12000); // 延長至 12s
+                const timeoutId = setTimeout(() => controller.abort(), 12000);
                 
                 const response = await fetch(proxyUrl, { signal: controller.signal });
                 clearTimeout(timeoutId);
@@ -37,22 +39,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     try {
                         content = JSON.parse(content);
                     } catch (e) {
-                         // 對於 Yahoo，有時回傳不是 JSON
-                         if (isYahoo) return content; 
-                         throw new Error(`JSON Parse Error: ${content.substring(0, 50)}`);
+                         if (isYahoo) return content; // Yahoo 有時會被包裝成字串
+                         throw new Error(`Parse Failed: ${content.substring(0, 30)}`);
                     }
                 }
                 
                 if (content && content.status === 429) throw new Error("API 429");
-
                 return content;
             } catch (err) {
                 lastError = err;
-                console.warn(`Proxy failed: ${err.message}`);
+                console.warn(`[Proxy Error] ${err.message}`);
                 if (err.message.includes("429")) break;
             }
         }
-        throw new Error(lastError ? lastError.message : "通訊異常");
+        throw new Error(lastError ? lastError.message : "連線失敗");
     }
 
     // 選擇商品
@@ -86,8 +86,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             let klines;
-            console.log(`[V2.0.0] Starting client-side analysis for ${currentSymbol} @ ${currentInterval}`);
-            
             if (currentSymbol === 'bitcoin') {
                 klines = await fetchCryptoKlines('BTC-USDT', currentInterval);
             } else {
@@ -95,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (!klines || klines.length < 60) {
-                throw new Error(`K線資料量不足 (${klines ? klines.length : 0} 根)，分析無法進行。請稍後再試。`);
+                throw new Error(`K線資料量不足 (${klines ? klines.length : 0} 根)，分析無法進行。`);
             }
 
             const analysis = performAnalysis(klines);
@@ -105,8 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert(`發生錯誤: ${error.message}`);
         } finally {
             loading.style.display = 'none';
-            // 實施 5 秒冷卻時間
-            let cooldown = 5;
+            let cooldown = 3; // 縮短冷卻時間
             const timer = setInterval(() => {
                 executeBtn.innerText = `冷卻中 (${cooldown}s)`;
                 cooldown--;
@@ -119,16 +116,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    /**
-     * 前端資料獲取: 加密貨幣 (使用 Binance Public API 或其他無需 CORS 的來源)
-     */
     async function fetchCryptoKlines(symbol, interval) {
-        // 使用 Binance Public API
         const mapping = { '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
         const binanceInterval = mapping[interval] || '1h';
         const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${binanceInterval}&limit=100`;
         
-        // 直接 Fetch 如果失敗 (通常是 CORS)，則走 Proxy
         try {
             const res = await fetch(url);
             if (res.ok) {
@@ -136,23 +128,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 return data.map(d => ({ close: parseFloat(d[4]), time: d[0] }));
             }
         } catch (e) {
-            console.warn('Direct fetch failed, trying CORS Proxy for Binance...');
+            console.warn('Crypto direct fetch failed, using proxy...');
         }
         
         const data = await corsProxyFetch(url);
-        return data.map(d => ({
-            close: parseFloat(d[4]),
-            time: d[0]
-        }));
+        return data.map(d => ({ close: parseFloat(d[4]), time: d[0] }));
     }
 
-    /**
-     * 前端版 Yahoo Finance 抓取 (透過 Proxy)
-     */
     async function fetchYahooKlinesFrontEnd(symbol) {
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=6mo`;
         const data = await corsProxyFetch(url, true);
-        
         const result = data.chart.result[0];
         if (!result || !result.timestamp) throw new Error('Yahoo No Data');
         
@@ -160,43 +145,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const quotes = result.indicators.quote[0];
         return timestamps.map((t, i) => ({
             time: t * 1000,
-            close: quotes.close[i],
-            dateStr: new Date(t * 1000).toISOString().split('T')[0]
+            close: quotes.close[i]
         })).filter(d => d.close != null);
     }
 
     async function fetchStockKlines(symbol, interval) {
-        // 先嘗試 Yahoo (因其對週末資料較友善)
+        // 優先嘗試 Yahoo
         try {
-            console.log("[V2.5.0] Primary: Attempting Yahoo Finance...");
-            const klines = await fetchYahooKlinesFrontEnd('^TWII');
-            if (klines.length >= 60) return klines;
+            return await fetchYahooKlinesFrontEnd('^TWII');
         } catch (e) {
-            console.warn("Yahoo Primary failed:", e.message);
+            console.warn("Yahoo failed, trying FinMind fallback...", e.message);
         }
 
         const now = new Date();
-        const startDate = new Date(now.getTime() - (150 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-        
+        const startDate = new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         const datasets = [
-            { ds: 'TaiwanStockDaily', id: '0050', name: 'FinMind-0050' },
-            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: 'FinMind-TXF' }
+            { ds: 'TaiwanStockDaily', id: '0050' },
+            { ds: 'TaiwanFuturesDaily', id: 'TXF' }
         ];
 
-        let lastErr;
         for (const target of datasets) {
             try {
                 const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
-                console.log(`[V2.5.0] Secondary: Fetching ${target.name}...`);
-                
                 const data = await corsProxyFetch(url);
                 if (data && data.data && data.data.length > 30) {
                     const mapped = data.data.map(d => ({
                         close: d.close,
-                        time: new Date(d.date || d.time).getTime(),
-                        dateStr: d.date || '--'
+                        time: new Date(d.date || d.time).getTime()
                     }));
-                    
                     while (mapped.length < 60) {
                         const first = mapped[0];
                         mapped.unshift({ ...first, time: first.time - 86400000 });
@@ -204,22 +180,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     return mapped;
                 }
             } catch (e) {
-                lastErr = e;
+                console.warn(`FinMind ${target.id} failed: ${e.message}`);
                 if (e.message.includes("429")) throw e;
             }
         }
-
-        throw new Error(`所有路徑皆失敗 (${lastErr ? lastErr.message : '403/Blocked'})。這代表公共 Proxy 集群今日已達上限。請按 Ctrl+F5 刷新網頁，或待會再試。`);
+        throw new Error("無法取得台股資料。建議週一市場開盤後再試，或檢查網路連線。");
     }
 
-    /**
-     * 前端技術分析 (SMA + MACD)
-     */
     function performAnalysis(klines) {
         const closes = klines.map(k => k.close);
         const lastPrice = closes[closes.length - 1];
 
-        // 簡易 SMA 實作 (避免依賴外部庫)
         const getSMA = (data, window) => {
             let result = [];
             for (let i = window - 1; i < data.length; i++) {
@@ -230,7 +201,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return result;
         };
 
-        // 簡易 EMA 實作
         const getEMA = (data, window) => {
             const k = 2 / (window + 1);
             let emaArr = [data[0]];
@@ -242,8 +212,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const sma10 = getSMA(closes, 10);
         const sma60 = getSMA(closes, 60);
-
-        // MACD (12, 26, 9)
         const ema12 = getEMA(closes, 12);
         const ema26 = getEMA(closes, 26);
         const dif = ema12.map((v, i) => v - ema26[i]);
@@ -257,7 +225,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const currDEA = dea[dea.length - 1];
         const prevDIF = dif[dif.length - 2];
 
-        // 判斷
         const cond1 = lastPrice > currSMA60;
         const cond2 = (currSMA10 > currSMA60) && (currSMA10 > prevSMA10);
         const cond3 = (currDIF > currDEA) && (currDIF > prevDIF);
@@ -275,25 +242,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayResults(data) {
-        const decision = document.getElementById('final-decision');
-        
-        // 綜合判定
-        decision.textContent = data.isMatch ? '符合' : '不符合';
-        decision.className = 'status-badge ' + (data.isMatch ? 'match' : 'no-match');
-
-        // SMA10
+        document.getElementById('final-decision').textContent = data.isMatch ? '符合' : '不符合';
+        document.getElementById('final-decision').className = 'status-badge ' + (data.isMatch ? 'match' : 'no-match');
         document.getElementById('sma10-val').textContent = data.summary.sma10.value;
         document.getElementById('sma10-trend').textContent = data.summary.sma10.trend;
-
-        // SMA60
         document.getElementById('sma60-val').textContent = data.summary.sma60.value;
         document.getElementById('sma60-trend').textContent = data.summary.sma60.trend;
-
-        // MACD
         document.getElementById('macd-fast').textContent = data.summary.macd.fast;
         document.getElementById('macd-signal').textContent = data.summary.macd.signal;
         document.getElementById('macd-bullish').textContent = data.summary.macd.isBullish;
-
         resultArea.style.display = 'block';
     }
 });
