@@ -54,12 +54,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         throw new Error(lastError ? lastError.message : "通訊異常");
     }
-理了（因為是 API 端的限制）
-                if (err.message.includes("429")) break;
-            }
-        }
-        throw new Error(lastError ? lastError.message : "通訊異常");
-    }
 
     // 選擇商品
     symbolBtns.forEach(btn => {
