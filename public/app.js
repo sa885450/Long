@@ -54,8 +54,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             console.error('Fetch error:', error);
-            const debugInfo = error.debug ? ` (K線數: ${error.debug.klinesCount})` : '';
-            alert(`發生錯誤: ${error.message}${debugInfo}`);
+            let msg = error.message;
+            if (error.response && error.response.data && error.response.data.debug) {
+                const debug = error.response.data.debug;
+                msg += ` (K線數: ${debug.klinesCount || 0}, 版本: ${debug.version})`;
+            }
+            alert(`發生錯誤: ${msg}`);
         } finally {
             loading.style.display = 'none';
             
