@@ -23,9 +23,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let lastError;
         for (const proxyGen of proxies) {
-            try {
-                const proxyUrl = proxyGen(url);
-                console.log(`[V3.0.0] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
+                // [V3.4.0] 加入 Cache-Buster 隨機亂數，強制繞過代理或 CDN 快取
+                const urlWithCacheBuster = url + (url.includes('?') ? '&' : '?') + `_cachebuster=${Date.now()}`;
+                const proxyUrl = proxyGen(urlWithCacheBuster);
+                console.log(`[V3.4.0] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} (Buster: ${Date.now()}) via: ${proxyUrl}`);
                 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 15000); // 延長至 15s 應對盤中遲延
@@ -139,17 +140,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchYahooKlinesFrontEnd(symbol) {
-        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=6mo`;
+        // [V3.4.0] 使用 1d 範圍 + 1d 間隔，並確保 fetch 參數能觸發 Yahoo 的即時計算
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=6mo&includePrePost=false`;
         const data = await corsProxyFetch(url, true);
         const result = data.chart.result[0];
         if (!result || !result.timestamp) throw new Error('Yahoo No Data');
         
         const timestamps = result.timestamp;
-        const quotes = result.indicators.quote[0];
-        return timestamps.map((t, i) => ({
+        const indicators = result.indicators.quote[0];
+        const adjCloses = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : indicators.close;
+
+        // 建立資料點，確保包含最末端的即時收盤價 (Last Quote)
+        const mapped = timestamps.map((t, i) => ({
             time: t * 1000,
-            close: quotes.close[i]
+            close: adjCloses[i] !== null ? adjCloses[i] : indicators.close[i]
         })).filter(d => d.close != null);
+
+        // [偵錯筆記] 打印最後一筆資料時間，確認是否為今日
+        const lastData = mapped[mapped.length - 1];
+        console.log(`[V3.4.0] Last Data Point: ${new Date(lastData.time).toLocaleString()}, Price: ${lastData.close}`);
+        
+        return mapped;
     }
 
     async function fetchStockKlines(symbol, interval) {
