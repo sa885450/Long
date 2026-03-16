@@ -9,29 +9,23 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentInterval = '1h';
 
     /**
-     * CORS Proxy Fetch 轉發器 (多重備援版)
+     * CORS Proxy Race Fetch (3.5.0 平行競爭版)
+     * 同時向多個代理發送請求，取回第一個成功的結果。
      */
     async function corsProxyFetch(url, isYahoo = false) {
-        // [V3.3.0] 預定義 GAS 穩定轉發站
-        const gasProxy = "https://script.google.com/macros/s/AKfycbwP_A3fBvGfX7E3x_8t5t_o-O9U_C8J3X-V1v1V1v1V1v1V1v1/exec"; 
-
+        const urlWithCacheBuster = url + (url.includes('?') ? '&' : '?') + `_cb=${Date.now()}`;
+        
         const proxies = [
             (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
             (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
             (u) => `https://thingproxy.freeboard.io/fetch/${u}`
         ];
 
-        let lastError;
-        for (const proxyGen of proxies) {
+        const fetchWithTimeout = async (proxyGen, targetUrl) => {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 12000);
             try {
-                // [V3.4.0] 加入 Cache-Buster 隨機亂數
-                const urlWithCacheBuster = url + (url.includes('?') ? '&' : '?') + `_cachebuster=${Date.now()}`;
-                const proxyUrl = proxyGen(urlWithCacheBuster);
-                console.log(`[V3.4.1] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
-                
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000);
-                
+                const proxyUrl = proxyGen(targetUrl);
                 const response = await fetch(proxyUrl, { signal: controller.signal });
                 clearTimeout(timeoutId);
                 
@@ -45,19 +39,31 @@ document.addEventListener('DOMContentLoaded', () => {
                         content = JSON.parse(content);
                     } catch (e) {
                          if (isYahoo) return content;
-                         throw new Error(`Parse Failed: ${content.substring(0, 30)}`);
+                         throw new Error(`Parse Error`);
                     }
                 }
                 
-                if (content && content.status === 429) throw new Error("API 429");
+                if (content && content.status === 429) throw new Error("429");
                 return content;
             } catch (err) {
-                lastError = err;
-                console.warn(`[Proxy Error] ${err.message}`);
-                if (err.message.includes("429")) break;
+                clearTimeout(timeoutId);
+                throw err;
             }
+        };
+
+        // 平行競爭：同時發射所有請求
+        console.log(`[V3.5.0] Racing ${proxies.length} proxies for: ${isYahoo ? 'Yahoo' : 'FinMind'}`);
+        
+        const promises = proxies.map(p => fetchWithTimeout(p, urlWithCacheBuster));
+        
+        // 使用 Promise.any (或相容性的競爭邏輯)
+        try {
+            // Promise.any 會在任何一個成功的 Promise 完成時解析
+            return await Promise.any(promises);
+        } catch (err) {
+            console.error("[V3.5.0] All proxies failed in race fetch.");
+            throw new Error("連線全數阻塞 (HTTP 403/429)。代理站今日負載已達上限，請 10 分鐘後重試。");
         }
-        throw new Error(lastError ? lastError.message : "連線失敗");
     }
 
     // 選擇商品
@@ -98,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (!klines || klines.length < 60) {
-                throw new Error(`K線資料量不足 (${klines ? klines.length : 0} 根)，分析無法進行。`);
+                throw new Error(`K線資料量不足 (${klines ? klines.length : 0} 根)`);
             }
 
             const analysis = performAnalysis(klines);
@@ -152,11 +158,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const mapped = timestamps.map((t, i) => ({
             time: t * 1000,
-            close: adjCloses[i] !== null ? adjCloses[i] : indicators.close[i]
-        })).filter(d => d.close != null);
+            close: adjCloses[i] !== null ? adjCloses[i] : (indicators.close[i] !== null ? indicators.close[i] : 0)
+        })).filter(d => d.close > 0);
 
         const lastData = mapped[mapped.length - 1];
-        console.log(`[V3.4.1] Last Data Point: ${new Date(lastData.time).toLocaleString()}, Price: ${lastData.close}`);
+        console.log(`[V3.5.0] Last Data: ${new Date(lastData.time).toLocaleString()}, Price: ${lastData.close}`);
         
         return mapped;
     }
@@ -166,14 +172,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const klines = await fetchYahooKlinesFrontEnd('^TWII');
             if (klines && klines.length >= 60) return klines;
         } catch (e) {
-            console.warn("Yahoo ^TWII failed, sliding to fallback...", e.message);
+            console.warn("[V3.5.0] Yahoo Fetch Abandoned, switch to backup chain.");
         }
 
         const now = new Date();
         const startDate = new Date(now.getTime() - (200 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         const fallbacks = [
-            { ds: 'TaiwanStockDaily', id: '0050', name: '0050 (FinMind)' },
-            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: 'TXF (FinMind)' }
+            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: 'TXF (期指)' },
+            { ds: 'TaiwanStockDaily', id: '0050', name: '0050 (現貨)' }
         ];
 
         for (const target of fallbacks) {
@@ -181,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
                 const data = await corsProxyFetch(url);
                 
-                if (data && data.data && data.data.length > 20) {
+                if (data && data.data && data.data.length > 15) {
                     const mapped = data.data.map(d => ({
                         close: d.close,
                         time: new Date(d.date || d.time).getTime()
@@ -194,10 +200,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     return mapped;
                 }
             } catch (e) {
-                console.warn(`Fallback ${target.name} failed: ${e.message}`);
+                console.warn(`[V3.5.0] ${target.name} failed`);
             }
         }
-        throw new Error("台股連線阻塞。請稍後再試，或先切換「比特幣」驗證。");
+        throw new Error("台股連線全數受阻，請 5 分鐘後再試。");
     }
 
     function performAnalysis(klines) {
