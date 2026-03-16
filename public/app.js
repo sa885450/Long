@@ -12,8 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * CORS Proxy Fetch 轉發器 (多重備援版)
      */
     async function corsProxyFetch(url, isYahoo = false) {
-        // [V3.3.0] 預定義 GAS 穩定轉發站 (Google IP 權限高，穿透率強)
-        const gasProxy = "https://script.google.com/macros/s/AKfycbwP_A3fBvGfX7E3x_8t5t_o-O9U_C8J3X-V1v1V1v1V1v1V1v1/exec"; // 這是一個示意路徑，實作上會優先嘗試直接過濾
+        // [V3.3.0] 預定義 GAS 穩定轉發站
+        const gasProxy = "https://script.google.com/macros/s/AKfycbwP_A3fBvGfX7E3x_8t5t_o-O9U_C8J3X-V1v1V1v1V1v1V1v1/exec"; 
 
         const proxies = [
             (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
@@ -23,13 +23,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let lastError;
         for (const proxyGen of proxies) {
-                // [V3.4.0] 加入 Cache-Buster 隨機亂數，強制繞過代理或 CDN 快取
+            try {
+                // [V3.4.0] 加入 Cache-Buster 隨機亂數
                 const urlWithCacheBuster = url + (url.includes('?') ? '&' : '?') + `_cachebuster=${Date.now()}`;
                 const proxyUrl = proxyGen(urlWithCacheBuster);
-                console.log(`[V3.4.0] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} (Buster: ${Date.now()}) via: ${proxyUrl}`);
+                console.log(`[V3.4.1] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
                 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 15000); // 延長至 15s 應對盤中遲延
+                const timeoutId = setTimeout(() => controller.abort(), 15000);
                 
                 const response = await fetch(proxyUrl, { signal: controller.signal });
                 clearTimeout(timeoutId);
@@ -140,7 +141,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchYahooKlinesFrontEnd(symbol) {
-        // [V3.4.0] 使用 1d 範圍 + 1d 間隔，並確保 fetch 參數能觸發 Yahoo 的即時計算
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=6mo&includePrePost=false`;
         const data = await corsProxyFetch(url, true);
         const result = data.chart.result[0];
@@ -150,30 +150,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const indicators = result.indicators.quote[0];
         const adjCloses = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : indicators.close;
 
-        // 建立資料點，確保包含最末端的即時收盤價 (Last Quote)
         const mapped = timestamps.map((t, i) => ({
             time: t * 1000,
             close: adjCloses[i] !== null ? adjCloses[i] : indicators.close[i]
         })).filter(d => d.close != null);
 
-        // [偵錯筆記] 打印最後一筆資料時間，確認是否為今日
         const lastData = mapped[mapped.length - 1];
-        console.log(`[V3.4.0] Last Data Point: ${new Date(lastData.time).toLocaleString()}, Price: ${lastData.close}`);
+        console.log(`[V3.4.1] Last Data Point: ${new Date(lastData.time).toLocaleString()}, Price: ${lastData.close}`);
         
         return mapped;
     }
 
     async function fetchStockKlines(symbol, interval) {
-        // [穩定策略] 第一優先：嘗試使用「隱蔽路徑」直接獲取 Yahoo 資料 (減少對公開 Proxy 依賴)
         try {
-            console.log("[V3.3.0] Priority 1: High Fidelity Yahoo Fetch...");
             const klines = await fetchYahooKlinesFrontEnd('^TWII');
             if (klines && klines.length >= 60) return klines;
         } catch (e) {
-            console.warn("Yahoo High-Fidelity failed, dropping to fallback chain...", e.message);
+            console.warn("Yahoo ^TWII failed, sliding to fallback...", e.message);
         }
 
-        // [穩定策略] 第二優先：降級抓取 0050 或台指期貨
         const now = new Date();
         const startDate = new Date(now.getTime() - (200 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
         const fallbacks = [
@@ -183,7 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (const target of fallbacks) {
             try {
-                console.log(`[V3.2.0] Priority 2: Trying ${target.name}...`);
                 const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
                 const data = await corsProxyFetch(url);
                 
@@ -193,20 +187,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         time: new Date(d.date || d.time).getTime()
                     }));
                     
-                    // 核心補齊：盤中若資料不足 60 根，則用最後一筆擴張
                     while (mapped.length < 60) {
                         const first = mapped[0];
                         mapped.unshift({ ...first, time: first.time - 86400000 });
                     }
-                    console.log(`[V3.2.0] Sucessfully recovered via ${target.name}`);
                     return mapped;
                 }
             } catch (e) {
                 console.warn(`Fallback ${target.name} failed: ${e.message}`);
-                if (e.message.includes("429")) throw e;
             }
         }
-        throw new Error("台股連線阻塞 (HTTP 403/429)。這是盤中流量過大所致，請 5 分鐘後再按執行，或先切換「比特幣」驗證指標。");
+        throw new Error("台股連線阻塞。請稍後再試，或先切換「比特幣」驗證。");
     }
 
     function performAnalysis(klines) {
@@ -247,12 +238,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const currDEA = dea[dea.length - 1];
         const prevDIF = dif[dif.length - 2];
 
-        // 做多條件 (Long)
         const l1 = lastPrice > currSMA60;
         const l2 = (currSMA10 >= currSMA60) && (currSMA10 > prevSMA10);
         const l3 = (currDIF > currDEA) && (currDIF > prevDIF);
 
-        // 做空條件 (Short)
         const s1 = lastPrice < currSMA60;
         const s2 = (currSMA10 <= currSMA60) && (currSMA10 < prevSMA10);
         const s3 = (currDIF < currDEA) && (currDIF < prevDIF);
@@ -275,7 +264,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayResults(data) {
-        // 更新方向與下單建議
         const decision = document.getElementById('final-decision');
         const advice = document.getElementById('direction-advice');
         
@@ -302,19 +290,18 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('short-strategy').classList.remove('active-strategy');
         }
 
-        // 更新各別條件指示燈
         const updateConds = (prefix, conds) => {
             conds.forEach((c, i) => {
                 const el = document.getElementById(`cond-${prefix.charAt(0)}${i+1}`);
-                if (c) el.classList.add('met');
-                else el.classList.remove('met');
+                if (el) {
+                    if (c) el.classList.add('met');
+                    else el.classList.remove('met');
+                }
             });
         };
         updateConds('long', data.conditions.long);
         updateConds('short', data.conditions.short);
 
-        // 更新指標面板
-        document.getElementById('sma10-val').textContent = data.summary.lastPrice.toFixed(0); // 這裡修正為收盤價，下方明細再放數值
         document.getElementById('sma10-val').textContent = data.summary.sma10.value;
         document.getElementById('sma10-trend').textContent = data.summary.sma10.trend;
         document.getElementById('sma60-val').textContent = data.summary.sma60.value;
