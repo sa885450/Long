@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log(`[V3.0.0] Fetching ${isYahoo ? 'Yahoo' : 'FinMind'} via: ${proxyUrl}`);
                 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 12000);
+                const timeoutId = setTimeout(() => controller.abort(), 15000); // 延長至 15s 應對盤中遲延
                 
                 const response = await fetch(proxyUrl, { signal: controller.signal });
                 clearTimeout(timeoutId);
@@ -150,40 +150,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchStockKlines(symbol, interval) {
+        // [穩定策略] 第一優先：嘗試直接抓取 Yahoo 指數 (透過 Proxy)
         try {
-            return await fetchYahooKlinesFrontEnd('^TWII');
+            console.log("[V3.2.0] Priority 1: Fetching Yahoo Finance ^TWII...");
+            const klines = await fetchYahooKlinesFrontEnd('^TWII');
+            if (klines && klines.length >= 60) return klines;
         } catch (e) {
-            console.warn("Yahoo failed, trying FinMind fallback...", e.message);
+            console.warn("Yahoo ^TWII failed, sliding to fallback...", e.message);
         }
 
+        // [穩定策略] 第二優先：降級抓取 0050 或台指期貨
         const now = new Date();
-        const startDate = new Date(now.getTime() - (180 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
-        const datasets = [
-            { ds: 'TaiwanStockDaily', id: '0050' },
-            { ds: 'TaiwanFuturesDaily', id: 'TXF' }
+        const startDate = new Date(now.getTime() - (200 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0];
+        const fallbacks = [
+            { ds: 'TaiwanStockDaily', id: '0050', name: '0050 (FinMind)' },
+            { ds: 'TaiwanFuturesDaily', id: 'TXF', name: 'TXF (FinMind)' }
         ];
 
-        for (const target of datasets) {
+        for (const target of fallbacks) {
             try {
+                console.log(`[V3.2.0] Priority 2: Trying ${target.name}...`);
                 const url = `https://api.finmindtrade.com/api/v4/data?dataset=${target.ds}&data_id=${target.id}&start_date=${startDate}`;
                 const data = await corsProxyFetch(url);
-                if (data && data.data && data.data.length > 30) {
+                
+                if (data && data.data && data.data.length > 20) {
                     const mapped = data.data.map(d => ({
                         close: d.close,
                         time: new Date(d.date || d.time).getTime()
                     }));
+                    
+                    // 核心補齊：盤中若資料不足 60 根，則用最後一筆擴張
                     while (mapped.length < 60) {
                         const first = mapped[0];
                         mapped.unshift({ ...first, time: first.time - 86400000 });
                     }
+                    console.log(`[V3.2.0] Sucessfully recovered via ${target.name}`);
                     return mapped;
                 }
             } catch (e) {
-                console.warn(`FinMind ${target.id} failed: ${e.message}`);
+                console.warn(`Fallback ${target.name} failed: ${e.message}`);
                 if (e.message.includes("429")) throw e;
             }
         }
-        throw new Error("無法取得台股資料。建議稍後再試。");
+        throw new Error("台股連線阻塞 (HTTP 403/429)。這是盤中流量過大所致，請 5 分鐘後再按執行，或先切換「比特幣」驗證指標。");
     }
 
     function performAnalysis(klines) {
